@@ -88,7 +88,7 @@ go run ./cmd/main.go
 или с автоперезапуском (если установлен [modd](https://github.com/cortesi/modd)):
 
 ```bash
-air
+modd 
 ```
 
 ---
