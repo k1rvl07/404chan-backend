@@ -1,5 +1,3 @@
-# Makefile
-
 DB_URL = host=localhost user=postgres password=root dbname=404chan port=5432 sslmode=disable
 MIGRATIONS_DIR = migrations
 DRIVER = postgres
@@ -16,7 +14,6 @@ migrate-status:
 create-migration:
 	goose -dir $(MIGRATIONS_DIR) create $(NAME) sql
 
-# Алиасы
 up: migrate-up
 down: migrate-down
 status: migrate-status

@@ -32,7 +32,7 @@ func main() {
 		logger.Fatal("Failed to bootstrap application", zap.Error(err))
 	}
 
-	logger.Info("Server started", zap.String("addr", ":"+cfg.ServerPort))
+	logger.Info("Server started", zap.String("addr", "localhost:"+cfg.ServerPort))
 
 	if err := application.Router.Serve(":" + cfg.ServerPort); err != nil {
 		logger.Fatal("Server stopped with error", zap.Error(err))
