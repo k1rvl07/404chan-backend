@@ -1,18 +1,19 @@
 package session
 
 import (
-	"gorm.io/gorm"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type Repository interface {
 	GetUserByIP(ip string) (*User, error)
 	CreateUser(user *User) error
 	CreateSession(session *Session) error
+	CloseUserSessions(userID uint64) error
 	GetSessionByKey(sessionKey string) (*Session, error)
 	GetUserByID(id uint64) (*User, error)
 	UpdateSessionEndedAt(sessionID uint64) error
-	CloseUserSessions(userID uint64) error
 }
 
 type repository struct {
@@ -37,6 +38,12 @@ func (r *repository) CreateSession(session *Session) error {
 	return r.db.Create(session).Error
 }
 
+func (r *repository) CloseUserSessions(userID uint64) error {
+	return r.db.Model(&Session{}).
+		Where("user_id = ? AND ended_at IS NULL", userID).
+		Update("ended_at", time.Now().UTC()).Error
+}
+
 func (r *repository) GetSessionByKey(sessionKey string) (*Session, error) {
 	var session Session
 	err := r.db.Where("session_key = ?", sessionKey).First(&session).Error
@@ -52,11 +59,5 @@ func (r *repository) GetUserByID(id uint64) (*User, error) {
 func (r *repository) UpdateSessionEndedAt(sessionID uint64) error {
 	return r.db.Model(&Session{}).
 		Where("id = ?", sessionID).
-		Update("ended_at", time.Now().UTC()).Error
-}
-
-func (r *repository) CloseUserSessions(userID uint64) error {
-	return r.db.Model(&Session{}).
-		Where("user_id = ? AND ended_at IS NULL", userID).
 		Update("ended_at", time.Now().UTC()).Error
 }

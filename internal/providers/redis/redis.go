@@ -30,6 +30,7 @@ func NewRedisProvider(redisURL string, logger *zap.Logger) *RedisProvider {
 
 	go provider.startConnectionMonitor(context.Background())
 
+	provider.logger.Infow("Redis connected", "url", redisURL)
 	return provider
 }
 
@@ -41,13 +42,8 @@ func (r *RedisProvider) startConnectionMonitor(ctx context.Context) {
 
 	if err := r.Client.Ping(ctx).Err(); err == nil {
 		wasConnected = true
-		r.logger.Info("Redis connected",
-			zap.String("url", r.URL),
-		)
 	} else {
-		r.logger.Warnw("Redis unavailable at startup",
-			zap.Error(err),
-		)
+		r.logger.Warnw("Redis unavailable at startup", "error", err)
 	}
 
 	for {
@@ -77,8 +73,7 @@ type loggerHook struct {
 
 func (h *loggerHook) DialHook(next redis.DialHook) redis.DialHook {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		conn, err := next(ctx, network, addr)
-		return conn, err
+		return next(ctx, network, addr)
 	}
 }
 

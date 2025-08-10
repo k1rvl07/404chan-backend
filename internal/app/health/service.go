@@ -1,8 +1,9 @@
 package health
 
 import (
-	"backend/internal/utils"
 	"context"
+
+	"backend/internal/utils"
 )
 
 type HealthService struct {

@@ -1,16 +1,17 @@
 package main
 
 import (
+	"log"
+
 	"backend/internal/app"
 	"backend/internal/config"
 	"backend/internal/utils"
-	"log"
 
 	"go.uber.org/zap"
 )
 
 func main() {
-	logger, err := zap.NewDevelopment()
+	logger, err := utils.NewLogger()
 	if err != nil {
 		log.Fatalf("Failed to initialize zap logger: %v", err)
 	}

@@ -1,0 +1,118 @@
+package user
+
+import (
+	"net/http"
+	"time"
+
+	"backend/internal/app/session"
+	"backend/internal/utils"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+)
+
+type handler struct {
+	service    Service
+	sessionSvc session.Service
+	eventBus   *utils.EventBus
+	logger     *zap.SugaredLogger
+}
+
+type Handler interface {
+	GetUser(c *gin.Context)
+	UpdateNickname(c *gin.Context)
+}
+
+func NewHandler(service Service, sessionSvc session.Service, eventBus *utils.EventBus, logger *zap.Logger) Handler {
+	return &handler{
+		service:    service,
+		sessionSvc: sessionSvc,
+		eventBus:   eventBus,
+		logger:     logger.Sugar(),
+	}
+}
+
+func (h *handler) GetUser(c *gin.Context) {
+	sessionKey := c.Query("session_key")
+	if sessionKey == "" {
+		h.logger.Warnw("GetUser: session_key missing")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session_key is required"})
+		return
+	}
+
+	user, err := h.service.GetBySessionKey(sessionKey)
+	if err != nil {
+		h.logger.Warnw("GetUser: user not found", "session_key", sessionKey)
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	stats, err := h.service.GetStatsBySessionKey(sessionKey)
+	if err != nil {
+		stats = &UserActivity{UserID: user.ID, ThreadCount: 0, MessageCount: 0}
+	}
+
+	startedAt, err := h.sessionSvc.GetSessionStartedAtBySessionKey(sessionKey)
+	if err != nil {
+		h.logger.Warnw("GetUser: session not found", "session_key", sessionKey)
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	h.logger.Infow("GetUser: successful", "user_id", user.ID, "nickname", user.Nickname)
+
+	c.JSON(http.StatusOK, gin.H{
+		"ID":               user.ID,
+		"Nickname":         user.Nickname,
+		"CreatedAt":        user.CreatedAt,
+		"SessionStartedAt": startedAt,
+		"SessionKey":       sessionKey,
+		"MessagesCount":    stats.MessageCount,
+		"ThreadsCount":     stats.ThreadCount,
+	})
+}
+
+func (h *handler) UpdateNickname(c *gin.Context) {
+	var req struct {
+		SessionKey string `json:"session_key" binding:"required"`
+		Nickname   string `json:"nickname" binding:"required,min=1,max=16,alphanumunicode"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Warnw("UpdateNickname: invalid request", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "nickname must be 1-16 characters"})
+		return
+	}
+
+	session, err := h.sessionSvc.GetSessionByKey(req.SessionKey)
+	if err != nil {
+		h.logger.Warnw("UpdateNickname: session not found", "session_key", req.SessionKey)
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	if err := h.service.UpdateNickname(session.UserID, req.Nickname); err != nil {
+		h.logger.Errorw("UpdateNickname: failed to update in DB", "user_id", session.UserID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update nickname"})
+		return
+	}
+
+	h.logger.Infow("UpdateNickname: DB updated", "user_id", session.UserID, "new_nickname", req.Nickname)
+
+	eventData := map[string]interface{}{
+		"user_id":   int(session.UserID),
+		"nickname":  req.Nickname,
+		"timestamp": time.Now().UTC().Unix(),
+	}
+	h.logger.Infow("UpdateNickname: publishing event", "event", "nickname_updated", "data", eventData)
+	h.eventBus.Publish("nickname_updated", eventData)
+
+	c.JSON(http.StatusOK, gin.H{
+		"ID":            session.UserID,
+		"Nickname":      req.Nickname,
+		"CreatedAt":     time.Now().UTC().Format(time.RFC3339),
+		"SessionKey":    req.SessionKey,
+		"MessagesCount": 0,
+		"ThreadsCount":  0,
+	})
+}

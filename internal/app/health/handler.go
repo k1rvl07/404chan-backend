@@ -1,8 +1,9 @@
 package health
 
 import (
-	"backend/internal/utils"
 	"net/http"
+
+	"backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
