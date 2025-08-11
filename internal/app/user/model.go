@@ -3,11 +3,12 @@ package user
 import "time"
 
 type User struct {
-	ID        uint64    `gorm:"primaryKey"`
-	IP        string    `gorm:"type:inet;not null;unique"`
-	Nickname  string    `gorm:"not null;default:'Аноним'"`
-	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
+	ID                   uint64    `gorm:"primaryKey"`
+	IP                   string    `gorm:"type:inet;not null;unique"`
+	Nickname             string    `gorm:"not null;default:'Аноним'"`
+	CreatedAt            time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt            time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
+	LastNicknameChangeAt time.Time `gorm:"column:last_nickname_change;not null;default:CURRENT_TIMESTAMP"`
 }
 
 type UserActivity struct {

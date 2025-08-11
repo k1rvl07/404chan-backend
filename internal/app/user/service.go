@@ -2,6 +2,7 @@ package user
 
 import (
 	"fmt"
+	"time"
 )
 
 type Service interface {
@@ -23,16 +24,24 @@ func (s *service) GetBySessionKey(sessionKey string) (*User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
-
 	user, err := s.repo.GetUserByID(session.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
-
 	return user, nil
 }
 
 func (s *service) UpdateNickname(userID uint64, nickname string) error {
+	lastChange, err := s.repo.GetUserLastNicknameChange(userID)
+	if err != nil {
+		return fmt.Errorf("failed to get last nickname change time: %w", err)
+	}
+
+	now := time.Now().UTC()
+	if now.Sub(*lastChange) < time.Minute {
+		return fmt.Errorf("nickname can only be changed once per minute")
+	}
+
 	return s.repo.UpdateUserNickname(userID, nickname)
 }
 
@@ -41,6 +50,5 @@ func (s *service) GetStatsBySessionKey(sessionKey string) (*UserActivity, error)
 	if err != nil {
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
-
 	return s.repo.GetUserActivityByUserID(session.UserID)
 }

@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -23,7 +24,6 @@ func (h *Hub) ServeWS(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_key is required"})
 		return
 	}
-
 	user, err := h.sessionSvc.GetUserBySessionKey(sessionKey)
 	if err != nil {
 		h.logger.Warnw("WebSocket connection rejected: user not found",
@@ -60,6 +60,30 @@ func (h *Hub) ServeWS(c *gin.Context) {
 		"user_agent", c.GetHeader("User-Agent"),
 	)
 
+	lastChange, err := h.userRepo.GetUserLastNicknameChange(user.ID)
+	if err != nil {
+		h.logger.Errorw("ServeWS: failed to get last nickname change", "user_id", user.ID, "error", err)
+	} else {
+		now := time.Now().UTC()
+		if now.Sub(*lastChange) < time.Minute {
+			msg := map[string]interface{}{
+				"event":     "nickname_updated",
+				"user_id":   user.ID,
+				"nickname":  user.Nickname,
+				"timestamp": lastChange.Unix(),
+			}
+			if err := conn.WriteJSON(msg); err != nil {
+				h.logger.Errorw("ServeWS: failed to send initial nickname_updated", "user_id", user.ID, "error", err)
+			} else {
+				h.logger.Debugw("ServeWS: sent initial nickname_updated due to active cooldown",
+					"user_id", user.ID,
+					"nickname", user.Nickname,
+					"time_left_seconds", time.Minute-now.Sub(*lastChange),
+				)
+			}
+		}
+	}
+
 	h.register <- client
 
 	for {
@@ -68,6 +92,5 @@ func (h *Hub) ServeWS(c *gin.Context) {
 			break
 		}
 	}
-
 	h.unregister <- client
 }

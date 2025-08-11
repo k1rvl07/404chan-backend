@@ -32,11 +32,11 @@ func Bootstrap(cfg *config.Config, logger *zap.Logger) (*Application, error) {
 	sessionRepo := session.NewRepository(dbConn)
 	sessionService := session.NewService(sessionRepo)
 
-	hub := websocket.NewHub(logger, sessionService, eventBus)
-	go hub.Run()
-
 	userRepo := user.NewRepository(dbConn)
 	userService := user.NewService(userRepo)
+
+	hub := websocket.NewHub(logger, sessionService, eventBus, userRepo)
+	go hub.Run()
 
 	userHandler := user.NewHandler(userService, sessionService, eventBus, logger)
 

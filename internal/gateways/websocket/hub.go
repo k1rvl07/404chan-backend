@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"backend/internal/app/session"
+	"backend/internal/app/user"
 	"backend/internal/utils"
 
 	"go.uber.org/zap"
@@ -40,9 +41,15 @@ type Hub struct {
 	logger     *zap.SugaredLogger
 	sessionSvc session.Service
 	eventBus   *utils.EventBus
+	userRepo   user.Repository
 }
 
-func NewHub(logger *zap.Logger, sessionSvc session.Service, eventBus *utils.EventBus) *Hub {
+func NewHub(
+	logger *zap.Logger,
+	sessionSvc session.Service,
+	eventBus *utils.EventBus,
+	userRepo user.Repository,
+) *Hub {
 	hub := &Hub{
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
@@ -50,6 +57,7 @@ func NewHub(logger *zap.Logger, sessionSvc session.Service, eventBus *utils.Even
 		logger:     logger.Sugar(),
 		sessionSvc: sessionSvc,
 		eventBus:   eventBus,
+		userRepo:   userRepo,
 	}
 
 	hub.eventBus.Subscribe("nickname_updated", func(event utils.Event) {

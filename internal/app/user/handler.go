@@ -77,28 +77,28 @@ func (h *handler) UpdateNickname(c *gin.Context) {
 		SessionKey string `json:"session_key" binding:"required"`
 		Nickname   string `json:"nickname" binding:"required,min=1,max=16,alphanumunicode"`
 	}
-
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.Warnw("UpdateNickname: invalid request", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "nickname must be 1-16 characters"})
 		return
 	}
-
 	session, err := h.sessionSvc.GetSessionByKey(req.SessionKey)
 	if err != nil {
 		h.logger.Warnw("UpdateNickname: session not found", "session_key", req.SessionKey)
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
-
 	if err := h.service.UpdateNickname(session.UserID, req.Nickname); err != nil {
+		if err.Error() == "nickname can only be changed once per minute" {
+			h.logger.Warnw("UpdateNickname: rate limited", "user_id", session.UserID)
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Менять ник можно не чаще раза в минуту"})
+			return
+		}
 		h.logger.Errorw("UpdateNickname: failed to update in DB", "user_id", session.UserID, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update nickname"})
 		return
 	}
-
 	h.logger.Infow("UpdateNickname: DB updated", "user_id", session.UserID, "new_nickname", req.Nickname)
-
 	eventData := map[string]interface{}{
 		"user_id":   int(session.UserID),
 		"nickname":  req.Nickname,
@@ -106,13 +106,13 @@ func (h *handler) UpdateNickname(c *gin.Context) {
 	}
 	h.logger.Infow("UpdateNickname: publishing event", "event", "nickname_updated", "data", eventData)
 	h.eventBus.Publish("nickname_updated", eventData)
-
 	c.JSON(http.StatusOK, gin.H{
-		"ID":            session.UserID,
-		"Nickname":      req.Nickname,
-		"CreatedAt":     time.Now().UTC().Format(time.RFC3339),
-		"SessionKey":    req.SessionKey,
-		"MessagesCount": 0,
-		"ThreadsCount":  0,
+		"ID":                     session.UserID,
+		"Nickname":               req.Nickname,
+		"CreatedAt":              time.Now().UTC().Format(time.RFC3339),
+		"SessionKey":             req.SessionKey,
+		"MessagesCount":          0,
+		"ThreadsCount":           0,
+		"LastNicknameChangeUnix": time.Now().UTC().Unix(),
 	})
 }
