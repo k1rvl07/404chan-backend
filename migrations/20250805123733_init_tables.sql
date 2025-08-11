@@ -4,9 +4,9 @@ CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
     ip INET NOT NULL UNIQUE,
     nickname TEXT NOT NULL DEFAULT 'Аноним' CHECK (LENGTH(nickname) >= 1 AND LENGTH(nickname) <= 16),
+    last_nickname_change TIMESTAMPTZ, 
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_nickname_change TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_users_ip ON users (ip);
 CREATE TABLE IF NOT EXISTS sessions (

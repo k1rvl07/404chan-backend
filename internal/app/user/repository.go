@@ -57,5 +57,5 @@ func (r *repository) GetUserLastNicknameChange(userID uint64) (*time.Time, error
 	if err != nil {
 		return nil, err
 	}
-	return &user.LastNicknameChangeAt, nil
+	return user.LastNicknameChangeAt, nil
 }

@@ -2,6 +2,7 @@ package user
 
 import (
 	"net/http"
+	"regexp"
 	"time"
 
 	"backend/internal/app/session"
@@ -75,19 +76,32 @@ func (h *handler) GetUser(c *gin.Context) {
 func (h *handler) UpdateNickname(c *gin.Context) {
 	var req struct {
 		SessionKey string `json:"session_key" binding:"required"`
-		Nickname   string `json:"nickname" binding:"required,min=1,max=16,alphanumunicode"`
+		Nickname   string `json:"nickname" binding:"required,min=1,max=16"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.Warnw("UpdateNickname: invalid request", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "nickname must be 1-16 characters"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Ник должен быть 1-16 символов"})
 		return
 	}
+
+	matched, err := regexp.MatchString(`^[\p{L}\p{N}]+$`, req.Nickname)
+	if err != nil {
+		h.logger.Errorw("UpdateNickname: regex failed", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate nickname"})
+		return
+	}
+	if !matched {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Ник должен содержать только буквы и цифры (без пробелов и символов)"})
+		return
+	}
+
 	session, err := h.sessionSvc.GetSessionByKey(req.SessionKey)
 	if err != nil {
 		h.logger.Warnw("UpdateNickname: session not found", "session_key", req.SessionKey)
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
+
 	if err := h.service.UpdateNickname(session.UserID, req.Nickname); err != nil {
 		if err.Error() == "nickname can only be changed once per minute" {
 			h.logger.Warnw("UpdateNickname: rate limited", "user_id", session.UserID)
@@ -98,6 +112,7 @@ func (h *handler) UpdateNickname(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update nickname"})
 		return
 	}
+
 	h.logger.Infow("UpdateNickname: DB updated", "user_id", session.UserID, "new_nickname", req.Nickname)
 	eventData := map[string]interface{}{
 		"user_id":   int(session.UserID),
@@ -106,6 +121,7 @@ func (h *handler) UpdateNickname(c *gin.Context) {
 	}
 	h.logger.Infow("UpdateNickname: publishing event", "event", "nickname_updated", "data", eventData)
 	h.eventBus.Publish("nickname_updated", eventData)
+
 	c.JSON(http.StatusOK, gin.H{
 		"ID":                     session.UserID,
 		"Nickname":               req.Nickname,

@@ -65,7 +65,7 @@ func (h *Hub) ServeWS(c *gin.Context) {
 		h.logger.Errorw("ServeWS: failed to get last nickname change", "user_id", user.ID, "error", err)
 	} else {
 		now := time.Now().UTC()
-		if now.Sub(*lastChange) < time.Minute {
+		if lastChange != nil && now.Sub(*lastChange) < time.Minute {
 			msg := map[string]interface{}{
 				"event":     "nickname_updated",
 				"user_id":   user.ID,

@@ -38,13 +38,17 @@ func (s *service) UpdateNickname(userID uint64, nickname string) error {
 	}
 
 	now := time.Now().UTC()
+
+	if lastChange == nil {
+		return s.repo.UpdateUserNickname(userID, nickname)
+	}
+
 	if now.Sub(*lastChange) < time.Minute {
 		return fmt.Errorf("nickname can only be changed once per minute")
 	}
 
 	return s.repo.UpdateUserNickname(userID, nickname)
 }
-
 func (s *service) GetStatsBySessionKey(sessionKey string) (*UserActivity, error) {
 	session, err := s.repo.GetSessionByKey(sessionKey)
 	if err != nil {
