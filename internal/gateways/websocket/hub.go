@@ -1,23 +1,27 @@
 package websocket
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"time"
 
 	"backend/internal/app/session"
 	"backend/internal/app/user"
+	"backend/internal/providers/redis"
 	"backend/internal/utils"
 
 	"go.uber.org/zap"
 )
 
 type Client struct {
-	hub       *Hub
-	conn      ClientConn
-	ID        string
-	SessionID string
-	UserID    uint64
+	hub        *Hub
+	conn       ClientConn
+	ID         string
+	SessionID  uint64
+	UserID     uint64
+	SessionKey string
 }
 
 type ClientConn interface {
@@ -42,6 +46,7 @@ type Hub struct {
 	sessionSvc session.Service
 	eventBus   *utils.EventBus
 	userRepo   user.Repository
+	redisP     *redis.RedisProvider
 }
 
 func NewHub(
@@ -49,6 +54,7 @@ func NewHub(
 	sessionSvc session.Service,
 	eventBus *utils.EventBus,
 	userRepo user.Repository,
+	redisP *redis.RedisProvider,
 ) *Hub {
 	hub := &Hub{
 		register:   make(chan *Client),
@@ -58,6 +64,7 @@ func NewHub(
 		sessionSvc: sessionSvc,
 		eventBus:   eventBus,
 		userRepo:   userRepo,
+		redisP:     redisP,
 	}
 
 	hub.eventBus.Subscribe("nickname_updated", func(event utils.Event) {
@@ -83,18 +90,53 @@ func (h *Hub) Run() {
 			h.logger.Infow("Client connected",
 				"client_id", client.ID,
 				"user_id", client.UserID,
-				"session_key", client.SessionID,
+				"session_id", client.SessionID,
+				"session_key", client.SessionKey,
 				"clients_count", len(h.clients),
 			)
 
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
+
 				h.logger.Infow("Client disconnected",
 					"client_id", client.ID,
 					"user_id", client.UserID,
+					"session_id", client.SessionID,
 					"clients_count", len(h.clients),
 				)
+
+				go func() {
+					if err := h.sessionSvc.UpdateSessionEndedAt(client.SessionID); err != nil {
+						h.logger.Errorw("Failed to close session on disconnect",
+							"session_id", client.SessionID,
+							"user_id", client.UserID,
+							"error", err,
+						)
+					} else {
+						h.logger.Debugw("Session ended_at updated",
+							"session_id", client.SessionID,
+							"user_id", client.UserID,
+						)
+					}
+				}()
+
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+
+					cacheKey := fmt.Sprintf("user:%d:session:%d", client.UserID, client.SessionID)
+					if err := h.redisP.Client.Del(ctx, cacheKey).Err(); err != nil {
+						h.logger.Errorw("Failed to delete Redis cache on disconnect",
+							"cache_key", cacheKey,
+							"error", err,
+						)
+					} else {
+						h.logger.Debugw("Redis cache deleted on disconnect",
+							"cache_key", cacheKey,
+						)
+					}
+				}()
 			}
 
 		case event := <-eventCh:

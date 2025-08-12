@@ -1,11 +1,15 @@
 package user
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"time"
 
 	"backend/internal/app/session"
+	"backend/internal/providers/redis"
 	"backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -17,6 +21,7 @@ type handler struct {
 	sessionSvc session.Service
 	eventBus   *utils.EventBus
 	logger     *zap.SugaredLogger
+	redisP     *redis.RedisProvider
 }
 
 type Handler interface {
@@ -24,12 +29,13 @@ type Handler interface {
 	UpdateNickname(c *gin.Context)
 }
 
-func NewHandler(service Service, sessionSvc session.Service, eventBus *utils.EventBus, logger *zap.Logger) Handler {
+func NewHandler(service Service, sessionSvc session.Service, eventBus *utils.EventBus, logger *zap.Logger, redisP *redis.RedisProvider) Handler {
 	return &handler{
 		service:    service,
 		sessionSvc: sessionSvc,
 		eventBus:   eventBus,
 		logger:     logger.Sugar(),
+		redisP:     redisP,
 	}
 }
 
@@ -39,6 +45,23 @@ func (h *handler) GetUser(c *gin.Context) {
 		h.logger.Warnw("GetUser: session_key missing")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_key is required"})
 		return
+	}
+
+	sess, err := h.sessionSvc.GetSessionByKey(sessionKey)
+	if err != nil {
+		h.logger.Warnw("GetUser: session not found", "session_key", sessionKey)
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+	cacheKey := fmt.Sprintf("user:%d:session:%d", sess.UserID, sess.ID)
+
+	ctx := context.Background()
+	if cached, err := h.redisP.Client.Get(ctx, cacheKey).Result(); err == nil {
+		var data map[string]interface{}
+		if jsonErr := json.Unmarshal([]byte(cached), &data); jsonErr == nil {
+			c.JSON(http.StatusOK, data)
+			return
+		}
 	}
 
 	user, err := h.service.GetBySessionKey(sessionKey)
@@ -60,9 +83,7 @@ func (h *handler) GetUser(c *gin.Context) {
 		return
 	}
 
-	h.logger.Infow("GetUser: successful", "user_id", user.ID, "nickname", user.Nickname)
-
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"ID":               user.ID,
 		"Nickname":         user.Nickname,
 		"CreatedAt":        user.CreatedAt,
@@ -70,7 +91,13 @@ func (h *handler) GetUser(c *gin.Context) {
 		"SessionKey":       sessionKey,
 		"MessagesCount":    stats.MessageCount,
 		"ThreadsCount":     stats.ThreadCount,
-	})
+	}
+
+	if dataBytes, err := json.Marshal(resp); err == nil {
+		h.redisP.SetWithDefaultTTL(ctx, cacheKey, dataBytes, 0)
+	}
+	h.logger.Infow("GetUser: successful", "user_id", user.ID, "nickname", user.Nickname)
+	c.JSON(http.StatusOK, resp)
 }
 
 func (h *handler) UpdateNickname(c *gin.Context) {
@@ -112,6 +139,9 @@ func (h *handler) UpdateNickname(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update nickname"})
 		return
 	}
+
+	cacheKey := fmt.Sprintf("user:%d:session:%d", session.UserID, session.ID)
+	h.redisP.Client.Del(context.Background(), cacheKey)
 
 	h.logger.Infow("UpdateNickname: DB updated", "user_id", session.UserID, "new_nickname", req.Nickname)
 	eventData := map[string]interface{}{

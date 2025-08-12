@@ -24,11 +24,22 @@ func (h *Hub) ServeWS(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_key is required"})
 		return
 	}
-	user, err := h.sessionSvc.GetUserBySessionKey(sessionKey)
+
+	session, err := h.sessionSvc.GetSessionByKey(sessionKey)
 	if err != nil {
-		h.logger.Warnw("WebSocket connection rejected: user not found",
+		h.logger.Warnw("WebSocket connection rejected: session not found",
 			"session_key", sessionKey,
 			"client_ip", c.ClientIP(),
+		)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "session not found"})
+		return
+	}
+
+	user, err := h.userRepo.GetUserByID(session.UserID)
+	if err != nil {
+		h.logger.Warnw("WebSocket connection rejected: user not found",
+			"user_id", session.UserID,
+			"session_key", sessionKey,
 		)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
 		return
@@ -45,17 +56,19 @@ func (h *Hub) ServeWS(c *gin.Context) {
 	defer conn.Close()
 
 	client := &Client{
-		hub:       h,
-		conn:      conn,
-		ID:        generateClientID(),
-		SessionID: sessionKey,
-		UserID:    user.ID,
+		hub:        h,
+		conn:       conn,
+		ID:         generateClientID(),
+		SessionID:  session.ID,
+		UserID:     user.ID,
+		SessionKey: sessionKey,
 	}
 
 	h.logger.Infow("WebSocket connection established",
 		"client_id", client.ID,
 		"user_id", client.UserID,
-		"session_key", client.SessionID,
+		"session_id", client.SessionID,
+		"session_key", client.SessionKey,
 		"client_ip", c.ClientIP(),
 		"user_agent", c.GetHeader("User-Agent"),
 	)
@@ -75,10 +88,14 @@ func (h *Hub) ServeWS(c *gin.Context) {
 			if err := conn.WriteJSON(msg); err != nil {
 				h.logger.Errorw("ServeWS: failed to send initial nickname_updated", "user_id", user.ID, "error", err)
 			} else {
+				elapsed := now.Sub(*lastChange)
+				remaining := time.Minute - elapsed
+				remainingSeconds := int64(remaining.Seconds())
+
 				h.logger.Debugw("ServeWS: sent initial nickname_updated due to active cooldown",
-					"user_id", user.ID,
+					"user_id", client.UserID,
 					"nickname", user.Nickname,
-					"time_left_seconds", time.Minute-now.Sub(*lastChange),
+					"time_left_seconds", remainingSeconds,
 				)
 			}
 		}

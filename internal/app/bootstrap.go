@@ -26,19 +26,19 @@ func Bootstrap(cfg *config.Config, logger *zap.Logger) (*Application, error) {
 		return nil, err
 	}
 
-	redisProvider := redis.NewRedisProvider(cfg.RedisURL, logger)
+	redisProvider := redis.NewRedisProvider(cfg.RedisURL, logger, cfg.RedisTTL)
 	eventBus := utils.NewEventBus()
 
 	sessionRepo := session.NewRepository(dbConn)
-	sessionService := session.NewService(sessionRepo)
+	sessionService := session.NewService(sessionRepo, redisProvider)
 
 	userRepo := user.NewRepository(dbConn)
 	userService := user.NewService(userRepo)
 
-	hub := websocket.NewHub(logger, sessionService, eventBus, userRepo)
+	hub := websocket.NewHub(logger, sessionService, eventBus, userRepo, redisProvider)
 	go hub.Run()
 
-	userHandler := user.NewHandler(userService, sessionService, eventBus, logger)
+	userHandler := user.NewHandler(userService, sessionService, eventBus, logger, redisProvider)
 
 	healthChecker := utils.HealthChecker{
 		DB:    dbConn,

@@ -1,10 +1,13 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"time"
+
+	"backend/internal/providers/redis"
 )
 
 type Service interface {
@@ -16,11 +19,12 @@ type Service interface {
 }
 
 type service struct {
-	repo Repository
+	repo   Repository
+	redisP *redis.RedisProvider
 }
 
-func NewService(repo Repository) Service {
-	return &service{repo: repo}
+func NewService(repo Repository, redisP *redis.RedisProvider) Service {
+	return &service{repo: repo, redisP: redisP}
 }
 
 func (s *service) CreateSessionAndUser(userAgent, ipStr string) (*Session, *User, error) {
@@ -78,6 +82,12 @@ func (s *service) GetSessionByKey(sessionKey string) (*Session, error) {
 }
 
 func (s *service) UpdateSessionEndedAt(sessionID uint64) error {
+	sessionData, err := s.repo.GetSessionByID(sessionID)
+	if err == nil && sessionData != nil {
+		cacheKey := fmt.Sprintf("user:%d:session:%d", sessionData.UserID, sessionData.ID)
+		s.redisP.Client.Del(context.Background(), cacheKey)
+	}
+
 	return s.repo.UpdateSessionEndedAt(sessionID)
 }
 

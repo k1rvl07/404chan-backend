@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 )
 
 type Config struct {
@@ -14,9 +15,16 @@ type Config struct {
 	ServerPort string
 	RedisURL   string
 	Env        string
+	RedisTTL   time.Duration
 }
 
 func LoadConfig() Config {
+	ttlStr := getEnv("REDIS_TTL", "5m")
+	ttl, err := time.ParseDuration(ttlStr)
+	if err != nil {
+		ttl = 5 * time.Minute
+	}
+
 	return Config{
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     getEnv("DB_PORT", "5432"),
@@ -26,6 +34,7 @@ func LoadConfig() Config {
 		ServerPort: getEnv("SERVER_PORT", "8080"),
 		RedisURL:   getEnv("REDIS_URL", "localhost:6379"),
 		Env:        getEnv("ENV", "dev"),
+		RedisTTL:   ttl,
 	}
 }
 

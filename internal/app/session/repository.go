@@ -12,6 +12,7 @@ type Repository interface {
 	CreateSession(session *Session) error
 	CloseUserSessions(userID uint64) error
 	GetSessionByKey(sessionKey string) (*Session, error)
+	GetSessionByID(sessionID uint64) (*Session, error)
 	GetUserByID(id uint64) (*User, error)
 	UpdateSessionEndedAt(sessionID uint64) error
 }
@@ -47,6 +48,12 @@ func (r *repository) CloseUserSessions(userID uint64) error {
 func (r *repository) GetSessionByKey(sessionKey string) (*Session, error) {
 	var session Session
 	err := r.db.Where("session_key = ?", sessionKey).First(&session).Error
+	return &session, err
+}
+
+func (r *repository) GetSessionByID(sessionID uint64) (*Session, error) {
+	var session Session
+	err := r.db.Where("id = ?", sessionID).First(&session).Error
 	return &session, err
 }
 
