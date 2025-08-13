@@ -1,6 +1,7 @@
 package router
 
 import (
+	"backend/internal/app/board"
 	"backend/internal/app/health"
 	"backend/internal/app/session"
 	"backend/internal/app/user"
@@ -23,20 +24,24 @@ func NewRouter(logger *zap.Logger) *Router {
 	return &Router{Engine: engine}
 }
 
-func (r *Router) RegisterHealthRoutes(ctrl *health.HealthController) {
-	health.RegisterRoutes(r.Engine.Group("/api"), ctrl)
+func (r *Router) RegisterHealthRoutes(handler health.Handler) {
+	health.RegisterRoutes(r.Engine.Group("/api"), handler)
 }
 
 func (r *Router) RegisterWebSocketRoutes(hub *websocket.Hub) {
 	websocket.RegisterRoutes(r.Engine, hub)
 }
 
-func (r *Router) RegisterSessionRoutes(service session.Service) {
-	session.RegisterRoutes(r.Engine.Group("/api"), service)
+func (r *Router) RegisterSessionRoutes(handler session.Handler) {
+	session.RegisterRoutes(r.Engine.Group("/api"), handler)
 }
 
 func (r *Router) RegisterUserRoutes(handler user.Handler) {
 	user.RegisterRoutes(r.Engine.Group("/api"), handler)
+}
+
+func (r *Router) RegisterBoardRoutes(handler board.Handler) {
+	board.RegisterRoutes(r.Engine.Group("/api"), handler)
 }
 
 func (r *Router) Serve(addr string) error {
