@@ -4,6 +4,7 @@ import (
 	"backend/internal/app/board"
 	"backend/internal/app/health"
 	"backend/internal/app/session"
+	"backend/internal/app/thread"
 	"backend/internal/app/user"
 	"backend/internal/gateways/websocket"
 	"backend/internal/middleware"
@@ -42,6 +43,10 @@ func (r *Router) RegisterUserRoutes(handler user.Handler) {
 
 func (r *Router) RegisterBoardRoutes(handler board.Handler) {
 	board.RegisterRoutes(r.Engine.Group("/api"), handler)
+}
+
+func (r *Router) RegisterThreadRoutes(handler thread.Handler) {
+	thread.RegisterRoutes(r.Engine.Group("/api"), handler)
 }
 
 func (r *Router) Serve(addr string) error {

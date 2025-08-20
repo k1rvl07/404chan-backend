@@ -76,6 +76,11 @@ func NewHub(
 		hub.handleEvent(event)
 	})
 
+	hub.eventBus.Subscribe("thread_created", func(event utils.Event) {
+		hub.logger.Infow("EventBus: thread_created triggered")
+		hub.handleEvent(event)
+	})
+
 	return hub
 }
 
@@ -153,9 +158,45 @@ func (h *Hub) handleEvent(event utils.Event) {
 		h.handleNicknameUpdated(event)
 	case "stats_updated":
 		h.handleStatsUpdated(event)
+	case "thread_created":
+		h.handleThreadCreated(event)
 	default:
 		h.logger.Warnw("Unknown event type", "event", event.Event)
 	}
+}
+
+func (h *Hub) handleThreadCreated(event utils.Event) {
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		h.logger.Errorw("handleThreadCreated: invalid data type",
+			"data_type", fmt.Sprintf("%T", event.Data),
+			"data", event.Data)
+		return
+	}
+
+	msg := map[string]interface{}{
+		"event": "thread_created",
+		"data":  data,
+	}
+
+	sent := 0
+	for client := range h.clients {
+		if err := client.conn.WriteJSON(msg); err != nil {
+			h.logger.Errorw("Failed to send thread_created to client",
+				"client_id", client.ID,
+				"user_id", client.UserID,
+				"error", err)
+			client.conn.Close()
+			h.unregister <- client
+		} else {
+			h.logger.Debugw("Sent thread_created to client",
+				"client_id", client.ID,
+				"user_id", client.UserID)
+			sent++
+		}
+	}
+
+	h.logger.Infow("thread_created broadcast completed", "sent_to_clients", sent)
 }
 
 func (h *Hub) handleNicknameUpdated(event utils.Event) {

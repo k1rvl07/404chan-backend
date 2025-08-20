@@ -1,8 +1,10 @@
 package user
 
 import (
-	"backend/internal/app/session"
+	"database/sql"
 	"time"
+
+	"backend/internal/app/session"
 
 	"gorm.io/gorm"
 )
@@ -13,6 +15,7 @@ type Repository interface {
 	UpdateUserNickname(userID uint64, nickname string) error
 	GetUserActivityByUserID(userID uint64) (*UserActivity, error)
 	GetUserLastNicknameChange(userID uint64) (*time.Time, error)
+	GetUserLastThreadTime(userID uint64) (*time.Time, error)
 }
 
 type repository struct {
@@ -58,4 +61,21 @@ func (r *repository) GetUserLastNicknameChange(userID uint64) (*time.Time, error
 		return nil, err
 	}
 	return user.LastNicknameChangeAt, nil
+}
+
+func (r *repository) GetUserLastThreadTime(userID uint64) (*time.Time, error) {
+	var lastThreadTime sql.NullTime
+	err := r.db.Model(&UserActivity{}).
+		Select("last_thread_at").
+		Where("user_id = ?", userID).
+		Scan(&lastThreadTime).Error
+	if err != nil {
+		return nil, err
+	}
+
+	if !lastThreadTime.Valid {
+		return nil, nil
+	}
+
+	return &lastThreadTime.Time, nil
 }
