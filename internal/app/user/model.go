@@ -16,6 +16,6 @@ type UserActivity struct {
 	ThreadCount   int    `gorm:"not null;default:0"`
 	MessageCount  int    `gorm:"not null;default:0"`
 	LastMessageAt *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	CreatedAt     time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt     time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
 }

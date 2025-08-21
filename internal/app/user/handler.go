@@ -27,6 +27,7 @@ type handler struct {
 type Handler interface {
 	GetUser(c *gin.Context)
 	UpdateNickname(c *gin.Context)
+	GetCooldown(c *gin.Context)
 }
 
 func NewHandler(service Service, sessionSvc session.Service, eventBus *utils.EventBus, logger *zap.Logger, redisP *redis.RedisProvider) Handler {
@@ -160,5 +161,38 @@ func (h *handler) UpdateNickname(c *gin.Context) {
 		"MessagesCount":          0,
 		"ThreadsCount":           0,
 		"LastNicknameChangeUnix": time.Now().UTC().Unix(),
+	})
+}
+
+func (h *handler) GetCooldown(c *gin.Context) {
+	sessionKey := c.Query("session_key")
+	if sessionKey == "" {
+		h.logger.Warnw("GetCooldown: session_key missing")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "session_key is required"})
+		return
+	}
+
+	session, err := h.sessionSvc.GetSessionByKey(sessionKey)
+	if err != nil {
+		h.logger.Warnw("GetCooldown: session not found", "session_key", sessionKey)
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	lastChange, err := h.service.GetUserLastNicknameChange(session.UserID)
+	if err != nil {
+		h.logger.Errorw("GetCooldown: failed to get last nickname change", "user_id", session.UserID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get last nickname change"})
+		return
+	}
+
+	var lastChangeUnix *int64
+	if lastChange != nil {
+		unixTime := lastChange.Unix()
+		lastChangeUnix = &unixTime
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"lastNicknameChangeUnix": lastChangeUnix,
 	})
 }

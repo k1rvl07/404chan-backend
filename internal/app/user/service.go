@@ -10,6 +10,7 @@ type Service interface {
 	UpdateNickname(userID uint64, nickname string) error
 	GetStatsBySessionKey(sessionKey string) (*UserActivity, error)
 	GetUserLastThreadTime(userID uint64) (*time.Time, error)
+	GetUserLastNicknameChange(userID uint64) (*time.Time, error)
 }
 
 type service struct {
@@ -61,4 +62,8 @@ func (s *service) GetStatsBySessionKey(sessionKey string) (*UserActivity, error)
 
 func (s *service) GetUserLastThreadTime(userID uint64) (*time.Time, error) {
 	return s.repo.GetUserLastThreadTime(userID)
+}
+
+func (s *service) GetUserLastNicknameChange(userID uint64) (*time.Time, error) {
+	return s.repo.GetUserLastNicknameChange(userID)
 }
