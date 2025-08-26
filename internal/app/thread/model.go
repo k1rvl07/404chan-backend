@@ -10,6 +10,6 @@ type Thread struct {
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	CreatedBy      uint64    `json:"created_by"`
-	AuthorNickname string    `json:"authorNickname"`
+	AuthorNickname string    `json:"author_nickname"`
 	MessagesCount  int       `json:"messages_count"`
 }

@@ -3,6 +3,7 @@ package router
 import (
 	"backend/internal/app/board"
 	"backend/internal/app/health"
+	"backend/internal/app/message"
 	"backend/internal/app/session"
 	"backend/internal/app/thread"
 	"backend/internal/app/user"
@@ -47,6 +48,10 @@ func (r *Router) RegisterBoardRoutes(handler board.Handler) {
 
 func (r *Router) RegisterThreadRoutes(handler thread.Handler) {
 	thread.RegisterRoutes(r.Engine.Group("/api"), handler)
+}
+
+func (r *Router) RegisterMessageRoutes(handler message.Handler) {
+	message.RegisterRoutes(r.Engine.Group("/api"), handler)
 }
 
 func (r *Router) Serve(addr string) error {

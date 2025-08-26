@@ -63,6 +63,10 @@ func (r *RedisProvider) Keys(ctx context.Context, pattern string) *redis.StringS
 	return r.Client.Keys(ctx, pattern)
 }
 
+func (r *RedisProvider) Scan(ctx context.Context, cursor uint64, pattern string, count int64) *redis.ScanCmd {
+	return r.Client.Scan(ctx, cursor, pattern, count)
+}
+
 func (r *RedisProvider) startConnectionMonitor(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()

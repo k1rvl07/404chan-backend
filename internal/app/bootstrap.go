@@ -3,6 +3,7 @@ package app
 import (
 	"backend/internal/app/board"
 	"backend/internal/app/health"
+	"backend/internal/app/message"
 	"backend/internal/app/session"
 	"backend/internal/app/thread"
 	"backend/internal/app/user"
@@ -35,11 +36,13 @@ func Bootstrap(cfg *config.Config, logger *zap.Logger) (*Application, error) {
 	userRepo := user.NewRepository(dbConn)
 	boardRepo := board.NewRepository(dbConn)
 	threadRepo := thread.NewRepository(dbConn)
+	messageRepo := message.NewRepository(dbConn)
 
 	sessionService := session.NewService(sessionRepo, redisProvider)
-	userService := user.NewService(userRepo)
+	userService := user.NewService(userRepo, sessionService, redisProvider, logger)
 	boardService := board.NewService(boardRepo)
 	threadService := thread.NewService(threadRepo, sessionService, userService, dbConn, redisProvider, eventBus, logger)
+	messageService := message.NewService(messageRepo, sessionService, userService, threadService, dbConn, redisProvider, eventBus, logger)
 
 	hub := websocket.NewHub(logger, sessionService, eventBus, userRepo, redisProvider)
 	go hub.Run()
@@ -52,6 +55,7 @@ func Bootstrap(cfg *config.Config, logger *zap.Logger) (*Application, error) {
 	userHandler := user.NewHandler(userService, sessionService, eventBus, logger, redisProvider)
 	boardHandler := board.NewHandler(boardService)
 	threadHandler := thread.NewHandler(threadService, sessionService, userService)
+	messageHandler := message.NewHandler(messageService, sessionService, userService)
 
 	r := router.NewRouter(logger)
 
@@ -61,6 +65,7 @@ func Bootstrap(cfg *config.Config, logger *zap.Logger) (*Application, error) {
 	r.RegisterUserRoutes(userHandler)
 	r.RegisterBoardRoutes(boardHandler)
 	r.RegisterThreadRoutes(threadHandler)
+	r.RegisterMessageRoutes(messageHandler)
 
 	return &Application{
 		Router: r,

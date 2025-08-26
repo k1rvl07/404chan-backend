@@ -69,16 +69,22 @@ func NewHub(
 
 	hub.eventBus.Subscribe("nickname_updated", func(event utils.Event) {
 		hub.logger.Infow("EventBus: nickname_updated triggered")
-		hub.handleEvent(event)
-	})
-	hub.eventBus.Subscribe("stats_updated", func(event utils.Event) {
-		hub.logger.Infow("EventBus: stats_updated triggered")
-		hub.handleEvent(event)
+		hub.handleNicknameUpdated(event)
 	})
 
 	hub.eventBus.Subscribe("thread_created", func(event utils.Event) {
 		hub.logger.Infow("EventBus: thread_created triggered")
-		hub.handleEvent(event)
+		hub.handleThreadCreated(event)
+	})
+
+	hub.eventBus.Subscribe("message_created", func(event utils.Event) {
+		hub.logger.Infow("EventBus: message_created triggered")
+		hub.handleMessageCreated(event)
+	})
+
+	hub.eventBus.Subscribe("stats_updated", func(event utils.Event) {
+		hub.logger.Infow("EventBus: stats_updated triggered")
+		hub.handleStatsUpdated(event)
 	})
 
 	return hub
@@ -152,14 +158,15 @@ func (h *Hub) Run() {
 }
 
 func (h *Hub) handleEvent(event utils.Event) {
-	h.logger.Infow("Handling event", "event", event.Event)
 	switch event.Event {
 	case "nickname_updated":
 		h.handleNicknameUpdated(event)
-	case "stats_updated":
-		h.handleStatsUpdated(event)
 	case "thread_created":
 		h.handleThreadCreated(event)
+	case "message_created":
+		h.handleMessageCreated(event)
+	case "stats_updated":
+		h.handleStatsUpdated(event)
 	default:
 		h.logger.Warnw("Unknown event type", "event", event.Event)
 	}
@@ -174,9 +181,35 @@ func (h *Hub) handleThreadCreated(event utils.Event) {
 		return
 	}
 
+	timestamp, hasTimestamp := data["timestamp"]
+	if !hasTimestamp {
+		h.logger.Errorw("handleThreadCreated: missing timestamp in event data")
+		return
+	}
+
+	threadID, hasThreadID := data["thread_id"]
+	if !hasThreadID {
+		h.logger.Errorw("handleThreadCreated: missing thread_id in event data")
+		return
+	}
+
+	boardID, hasBoardID := data["board_id"]
+	if !hasBoardID {
+		h.logger.Errorw("handleThreadCreated: missing board_id in event data")
+		return
+	}
+
 	msg := map[string]interface{}{
-		"event": "thread_created",
-		"data":  data,
+		"event":     "thread_created",
+		"thread_id": threadID,
+		"board_id":  boardID,
+		"timestamp": timestamp,
+	}
+
+	for k, v := range data {
+		if k != "thread_id" && k != "board_id" && k != "timestamp" {
+			msg[k] = v
+		}
 	}
 
 	sent := 0
@@ -197,6 +230,63 @@ func (h *Hub) handleThreadCreated(event utils.Event) {
 	}
 
 	h.logger.Infow("thread_created broadcast completed", "sent_to_clients", sent)
+}
+
+func (h *Hub) handleMessageCreated(event utils.Event) {
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		h.logger.Errorw("handleMessageCreated: invalid data type",
+			"data_type", fmt.Sprintf("%T", event.Data),
+			"data", event.Data)
+		return
+	}
+
+	timestamp, hasTimestamp := data["timestamp"]
+	if !hasTimestamp {
+		h.logger.Errorw("handleMessageCreated: missing timestamp in event data")
+		return
+	}
+
+	messageID, hasMessageID := data["message_id"]
+	if !hasMessageID {
+		h.logger.Errorw("handleMessageCreated: missing message_id in event data")
+		return
+	}
+
+	threadID, hasThreadID := data["thread_id"]
+	if !hasThreadID {
+		h.logger.Errorw("handleMessageCreated: missing thread_id in event data")
+		return
+	}
+
+	msg := map[string]interface{}{
+		"event":      "message_created",
+		"message_id": messageID,
+		"thread_id":  threadID,
+		"timestamp":  timestamp,
+	}
+
+	for k, v := range data {
+		if k != "message_id" && k != "thread_id" && k != "timestamp" {
+			msg[k] = v
+		}
+	}
+
+	sent := 0
+	for client := range h.clients {
+		if err := client.conn.WriteJSON(msg); err != nil {
+			h.logger.Errorw("Failed to send message_created to client",
+				"client_id", client.ID,
+				"user_id", client.UserID,
+				"error", err)
+			client.conn.Close()
+			h.unregister <- client
+		} else {
+			sent++
+		}
+	}
+
+	h.logger.Infow("message_created broadcast completed", "sent_to_clients", sent)
 }
 
 func (h *Hub) handleNicknameUpdated(event utils.Event) {
@@ -232,12 +322,13 @@ func (h *Hub) handleNicknameUpdated(event utils.Event) {
 	}
 
 	nickname, _ := data["nickname"].(string)
+	timestamp, _ := data["timestamp"]
 
 	msg := map[string]interface{}{
 		"event":     "nickname_updated",
 		"user_id":   userID,
 		"nickname":  nickname,
-		"timestamp": data["timestamp"],
+		"timestamp": timestamp,
 	}
 
 	sent := 0
@@ -247,16 +338,14 @@ func (h *Hub) handleNicknameUpdated(event utils.Event) {
 				h.logger.Errorw("Failed to send nickname_updated to client",
 					"client_id", client.ID,
 					"user_id", client.UserID,
-					"error", err,
-				)
+					"error", err)
 				client.conn.Close()
 				h.unregister <- client
 			} else {
 				h.logger.Debugw("Sent nickname_updated to client",
 					"client_id", client.ID,
 					"user_id", client.UserID,
-					"nickname", nickname,
-				)
+					"nickname", nickname)
 				sent++
 			}
 		}

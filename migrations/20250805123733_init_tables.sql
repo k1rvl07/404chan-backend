@@ -51,9 +51,10 @@ CREATE TABLE IF NOT EXISTS messages (
     thread_id BIGINT NOT NULL REFERENCES threads (id) ON DELETE CASCADE,
     user_id BIGINT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     parent_id BIGINT REFERENCES messages (id) ON DELETE CASCADE,
-    content TEXT NOT NULL,
+    content TEXT NOT NULL CHECK (LENGTH(content) >= 1 AND LENGTH(content) <= 9999),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    author_nickname VARCHAR(16) NOT NULL DEFAULT 'Аноним' CHECK (LENGTH(author_nickname) >= 1 AND LENGTH(author_nickname) <= 16)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages (thread_id);
 CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages (user_id);
@@ -142,14 +143,15 @@ CREATE TRIGGER trigger_create_threads_activity_on_thread
     EXECUTE FUNCTION create_threads_activity_on_thread();
 -- +goose StatementEnd
 
-
 -- +goose Down
 -- +goose StatementBegin
+DROP TRIGGER IF EXISTS trigger_create_user_activity_on_user ON users;
 DROP TRIGGER IF EXISTS trigger_update_user_and_thread_activity_on_message ON messages;
 DROP TRIGGER IF EXISTS trigger_create_threads_activity_on_thread ON threads;
+
+DROP FUNCTION IF EXISTS create_user_activity_on_user ();
 DROP FUNCTION IF EXISTS update_user_and_thread_activity_on_message ();
 DROP FUNCTION IF EXISTS create_threads_activity_on_thread ();
-DROP FUNCTION IF EXISTS create_user_activity_on_user ();
 
 DROP TABLE IF EXISTS threads_activity;
 DROP TABLE IF EXISTS user_activities;
