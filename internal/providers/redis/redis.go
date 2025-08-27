@@ -17,9 +17,19 @@ type RedisProvider struct {
 }
 
 func NewRedisProvider(redisURL string, logger *zap.Logger, ttl time.Duration) *RedisProvider {
-	client := redis.NewClient(&redis.Options{
-		Addr: redisURL,
-	})
+	opts, err := redis.ParseURL(redisURL)
+	if err != nil {
+		opts = &redis.Options{
+			Addr: redisURL,
+			DB:   0,
+		}
+	}
+
+	client := redis.NewClient(opts)
+
+	client.Options().MaxRetries = 3
+	client.Options().MinRetryBackoff = 100 * time.Millisecond
+	client.Options().MaxRetryBackoff = 500 * time.Millisecond
 
 	provider := &RedisProvider{
 		Client: client,
@@ -32,7 +42,17 @@ func NewRedisProvider(redisURL string, logger *zap.Logger, ttl time.Duration) *R
 
 	go provider.startConnectionMonitor(context.Background())
 
-	provider.logger.Infow("Redis connected", "url", redisURL, "default_ttl", ttl.String())
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		provider.logger.Errorw("Redis connection failed at startup", "error", err)
+	} else {
+		provider.logger.Infow("Redis connected",
+			"url", redisURL,
+			"db", opts.DB,
+			"username", opts.Username,
+			"default_ttl", ttl.String(),
+		)
+	}
+
 	return provider
 }
 
@@ -106,7 +126,13 @@ type loggerHook struct {
 
 func (h *loggerHook) DialHook(next redis.DialHook) redis.DialHook {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return next(ctx, network, addr)
+		conn, err := next(ctx, network, addr)
+		if err != nil {
+			h.provider.logger.Errorw("Redis dial failed", "network", network, "addr", addr, "error", err)
+		} else {
+			h.provider.logger.Debugw("Redis dialed", "network", network, "addr", addr)
+		}
+		return conn, err
 	}
 }
 
@@ -116,17 +142,26 @@ func (h *loggerHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 		err := next(ctx, cmd)
 		duration := time.Since(start)
 
-		if cmd.Name() == "ping" {
+		if cmd.Name() == "ping" && err == nil {
 			return err
 		}
 
-		h.provider.logger.Debugw("Redis command executed",
+		fields := []interface{}{
 			"command", cmd.Name(),
 			"args", cmd.Args(),
 			"duration_ms", duration.Milliseconds(),
 			"duration", duration.String(),
-			"error", err,
-		)
+		}
+		if err != nil {
+			fields = append(fields, "error", err)
+		}
+
+		if err != nil {
+			h.provider.logger.Errorw("Redis command failed", fields...)
+		} else {
+			h.provider.logger.Debugw("Redis command executed", fields...)
+		}
+
 		return err
 	}
 }
@@ -138,17 +173,27 @@ func (h *loggerHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.P
 		duration := time.Since(start)
 
 		for _, cmd := range cmds {
-			if cmd.Name() == "ping" {
+			if cmd.Name() == "ping" && err == nil {
 				continue
 			}
-			h.provider.logger.Debugw("Redis pipeline command executed",
+
+			fields := []interface{}{
 				"command", cmd.Name(),
 				"args", cmd.Args(),
 				"duration_ms", duration.Milliseconds(),
 				"duration", duration.String(),
-				"error", err,
-			)
+			}
+			if err != nil {
+				fields = append(fields, "error", err)
+			}
+
+			if err != nil {
+				h.provider.logger.Errorw("Redis pipeline command failed", fields...)
+			} else {
+				h.provider.logger.Debugw("Redis pipeline command executed", fields...)
+			}
 		}
+
 		return err
 	}
 }
