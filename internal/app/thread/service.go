@@ -157,7 +157,7 @@ func (s *service) CreateThread(
 		"content":         threadData.Content,
 		"created_at":      threadData.CreatedAt,
 		"updated_at":      threadData.UpdatedAt,
-		"created_by":      threadData.CreatedBy,
+		"created_by":      user.ID,
 		"author_nickname": threadData.AuthorNickname,
 		"messages_count":  threadData.MessagesCount,
 		"timestamp":       time.Now().UTC().Unix(),

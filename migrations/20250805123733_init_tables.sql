@@ -49,7 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_threads_created_by_session ON threads (created_by
 CREATE TABLE IF NOT EXISTS messages (
     id BIGSERIAL PRIMARY KEY,
     thread_id BIGINT NOT NULL REFERENCES threads (id) ON DELETE CASCADE,
-    user_id BIGINT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    created_by_session_id BIGINT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
     parent_id BIGINT REFERENCES messages (id) ON DELETE CASCADE,
     content TEXT NOT NULL CHECK (LENGTH(content) >= 1 AND LENGTH(content) <= 9999),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS messages (
     author_nickname VARCHAR(16) NOT NULL DEFAULT 'Аноним' CHECK (LENGTH(author_nickname) >= 1 AND LENGTH(author_nickname) <= 16)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages (thread_id);
-CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages (user_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_by_session ON messages (created_by_session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_parent_id ON messages (parent_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages (created_at DESC);
 
@@ -85,6 +85,10 @@ CREATE INDEX IF NOT EXISTS idx_user_activities_message_count ON user_activities 
 CREATE INDEX IF NOT EXISTS idx_user_activities_last_message ON user_activities (last_message_at DESC);
 CREATE INDEX IF NOT EXISTS idx_user_activities_last_thread ON user_activities (last_thread_at DESC);
 
+ALTER TABLE user_activities 
+ADD CONSTRAINT uk_user_activities_user_id 
+UNIQUE (user_id);
+
 CREATE OR REPLACE FUNCTION create_user_activity_on_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -102,13 +106,21 @@ CREATE TRIGGER trigger_create_user_activity_on_user
 
 CREATE OR REPLACE FUNCTION update_user_and_thread_activity_on_message()
 RETURNS TRIGGER AS $$
+DECLARE
+    user_id BIGINT;
 BEGIN
-    INSERT INTO user_activities (user_id, message_count, last_message_at)
-    VALUES (NEW.user_id, 1, NOW())
-    ON CONFLICT (user_id) DO UPDATE SET
-        message_count = user_activities.message_count + 1,
-        last_message_at = NOW(),
-        updated_at = NOW();
+    SELECT s.user_id INTO user_id
+    FROM sessions s
+    WHERE s.id = NEW.created_by_session_id;
+
+    IF user_id IS NOT NULL THEN
+        INSERT INTO user_activities (user_id, message_count, last_message_at)
+        VALUES (user_id, 1, NOW())
+        ON CONFLICT ON CONSTRAINT uk_user_activities_user_id DO UPDATE SET
+            message_count = user_activities.message_count + 1,
+            last_message_at = NOW(),
+            updated_at = NOW();
+    END IF;
 
     INSERT INTO threads_activity (thread_id, message_count, bump_at)
     VALUES (NEW.thread_id, 1, NOW())
@@ -152,6 +164,8 @@ DROP TRIGGER IF EXISTS trigger_create_threads_activity_on_thread ON threads;
 DROP FUNCTION IF EXISTS create_user_activity_on_user ();
 DROP FUNCTION IF EXISTS update_user_and_thread_activity_on_message ();
 DROP FUNCTION IF EXISTS create_threads_activity_on_thread ();
+
+ALTER TABLE user_activities DROP CONSTRAINT IF EXISTS uk_user_activities_user_id;
 
 DROP TABLE IF EXISTS threads_activity;
 DROP TABLE IF EXISTS user_activities;

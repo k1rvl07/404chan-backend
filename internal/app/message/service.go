@@ -96,7 +96,12 @@ func (s *service) CreateMessage(
 		}
 	}
 
-	message, err := s.repo.CreateMessage(threadID, user.ID, parentID, content, user.Nickname)
+	session, err := s.sessionSvc.GetSessionByKey(sessionKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+
+	message, err := s.repo.CreateMessage(threadID, session.ID, parentID, content, user.Nickname)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create message: %w", err)
 	}
@@ -109,7 +114,6 @@ func (s *service) CreateMessage(
 			s.logger.Errorw("Failed to get thread for cache invalidation", "error", err, "thread_id", threadID)
 		} else {
 			s.threadSvc.InvalidateThreadsCache(thread.BoardID)
-
 			s.threadSvc.InvalidateTopThreadsCache()
 		}
 	}
@@ -121,6 +125,7 @@ func (s *service) CreateMessage(
 		"created_at":      message.CreatedAt,
 		"updated_at":      message.UpdatedAt,
 		"author_nickname": message.AuthorNickname,
+		"user_id":         user.ID,
 		"timestamp":       time.Now().UTC().Unix(),
 	}
 	s.eventBus.Publish("message_created", eventData)

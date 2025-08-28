@@ -8,7 +8,7 @@ import (
 )
 
 type Repository interface {
-	CreateMessage(threadID uint64, userID uint64, parentID *uint64, content string, authorNickname string) (*Message, error)
+	CreateMessage(threadID uint64, sessionID uint64, parentID *uint64, content string, authorNickname string) (*Message, error)
 	GetMessagesByThreadID(threadID uint64, page int, limit int) ([]*Message, int64, error)
 	GetUserLastMessageTime(userID uint64) (*time.Time, error)
 	GetMessageByID(id uint64) (*Message, error)
@@ -24,19 +24,19 @@ func NewRepository(db *gorm.DB) Repository {
 
 func (r *repository) CreateMessage(
 	threadID uint64,
-	userID uint64,
+	sessionID uint64,
 	parentID *uint64,
 	content string,
 	authorNickname string,
 ) (*Message, error) {
 	message := &Message{
-		ThreadID:       threadID,
-		UserID:         userID,
-		ParentID:       parentID,
-		Content:        content,
-		AuthorNickname: authorNickname,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		ThreadID:           threadID,
+		CreatedBySessionID: sessionID,
+		ParentID:           parentID,
+		Content:            content,
+		AuthorNickname:     authorNickname,
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
 	}
 
 	result := r.db.Create(message)
@@ -53,19 +53,19 @@ func (r *repository) GetMessagesByThreadID(threadID uint64, page int, limit int)
 
 	offset := (page - 1) * limit
 
-	if err := r.db.
-		Where("thread_id = ?", threadID).
-		Order("created_at DESC").
+	if err := r.db.Table("messages").
+		Select("messages.*, users.nickname as author_nickname").
+		Joins("JOIN sessions ON sessions.id = messages.created_by_session_id").
+		Joins("JOIN users ON users.id = sessions.user_id").
+		Where("messages.thread_id = ?", threadID).
+		Order("messages.created_at DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&messages).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := r.db.
-		Model(&Message{}).
-		Where("thread_id = ?", threadID).
-		Count(&total).Error; err != nil {
+	if err := r.db.Model(&Message{}).Where("thread_id = ?", threadID).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -75,8 +75,9 @@ func (r *repository) GetMessagesByThreadID(threadID uint64, page int, limit int)
 func (r *repository) GetUserLastMessageTime(userID uint64) (*time.Time, error) {
 	var lastMessageTime sql.NullTime
 	err := r.db.Model(&Message{}).
-		Select("MAX(created_at)").
-		Where("user_id = ?", userID).
+		Select("MAX(messages.created_at)").
+		Joins("JOIN sessions ON sessions.id = messages.created_by_session_id").
+		Where("sessions.user_id = ?", userID).
 		Scan(&lastMessageTime).Error
 	if err != nil {
 		return nil, err
@@ -91,7 +92,12 @@ func (r *repository) GetUserLastMessageTime(userID uint64) (*time.Time, error) {
 
 func (r *repository) GetMessageByID(id uint64) (*Message, error) {
 	var message Message
-	err := r.db.Where("id = ?", id).First(&message).Error
+	err := r.db.Table("messages").
+		Select("messages.*, users.nickname as author_nickname").
+		Joins("JOIN sessions ON sessions.id = messages.created_by_session_id").
+		Joins("JOIN users ON users.id = sessions.user_id").
+		Where("messages.id = ?", id).
+		First(&message).Error
 	if err != nil {
 		return nil, err
 	}
