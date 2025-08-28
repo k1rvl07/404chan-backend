@@ -15,6 +15,7 @@ type Handler interface {
 	GetThreadsByBoardID(c *gin.Context)
 	GetThreadCooldown(c *gin.Context)
 	GetThreadByID(c *gin.Context)
+	GetTopThreads(c *gin.Context)
 }
 
 type handler struct {
@@ -76,7 +77,6 @@ func (h *handler) GetThreadsByBoardID(c *gin.Context) {
 	}
 
 	sort := c.DefaultQuery("sort", "new")
-
 	pageStr := c.DefaultQuery("page", "1")
 	limitStr := c.DefaultQuery("limit", "10")
 
@@ -154,4 +154,38 @@ func (h *handler) GetThreadByID(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, thread)
+}
+
+func (h *handler) GetTopThreads(c *gin.Context) {
+	sort := c.DefaultQuery("sort", "new")
+	pageStr := c.DefaultQuery("page", "1")
+	limitStr := c.DefaultQuery("limit", "10")
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 || limit > 50 {
+		limit = 10
+	}
+
+	threads, total, err := h.service.GetTopThreads(c.Request.Context(), sort, page, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get top threads"})
+		return
+	}
+
+	totalPages := (total + int64(limit) - 1) / int64(limit)
+
+	c.JSON(http.StatusOK, gin.H{
+		"threads": threads,
+		"pagination": gin.H{
+			"page":       page,
+			"limit":      limit,
+			"total":      total,
+			"totalPages": totalPages,
+		},
+	})
 }

@@ -5,6 +5,7 @@ import "time"
 type Thread struct {
 	ID             uint64    `json:"id"`
 	BoardID        uint64    `json:"board_id"`
+	BoardSlug      string    `json:"board_slug"`
 	Title          string    `json:"title"`
 	Content        string    `json:"content"`
 	CreatedAt      time.Time `json:"created_at"`

@@ -78,10 +78,12 @@ func (s *service) CreateMessage(
 	if contentLength < 1 || contentLength > 9999 {
 		return nil, fmt.Errorf("message content must be between 1 and 9999 characters, got %d", contentLength)
 	}
+
 	user, err := s.sessionSvc.GetUserBySessionKey(sessionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
+
 	lastMessageTime, err := s.GetUserLastMessageTime(user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get last message time: %w", err)
@@ -93,10 +95,12 @@ func (s *service) CreateMessage(
 			return nil, fmt.Errorf("message creation cooldown: %d seconds left", secondsLeft)
 		}
 	}
+
 	message, err := s.repo.CreateMessage(threadID, user.ID, parentID, content, user.Nickname)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create message: %w", err)
 	}
+
 	s.invalidateCache(threadID)
 
 	if s.threadSvc != nil {
@@ -105,6 +109,8 @@ func (s *service) CreateMessage(
 			s.logger.Errorw("Failed to get thread for cache invalidation", "error", err, "thread_id", threadID)
 		} else {
 			s.threadSvc.InvalidateThreadsCache(thread.BoardID)
+
+			s.threadSvc.InvalidateTopThreadsCache()
 		}
 	}
 
@@ -118,6 +124,7 @@ func (s *service) CreateMessage(
 		"timestamp":       time.Now().UTC().Unix(),
 	}
 	s.eventBus.Publish("message_created", eventData)
+
 	return message, nil
 }
 
@@ -133,6 +140,7 @@ func (s *service) GetMessagesByThreadID(
 	if limit > 50 {
 		limit = 50
 	}
+
 	cacheKey := fmt.Sprintf("%s:%d:page:%d:limit:%d", s.cachePrefix, threadID, page, limit)
 	cmd := s.redisP.Get(ctx, cacheKey)
 	cachedData, err := cmd.Result()
@@ -145,10 +153,12 @@ func (s *service) GetMessagesByThreadID(
 			return result.Messages, result.Total, nil
 		}
 	}
+
 	messages, total, err := s.repo.GetMessagesByThreadID(threadID, page, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get messages: %w", err)
 	}
+
 	if len(messages) > 0 {
 		result.Messages = messages
 		result.Total = total
@@ -157,6 +167,7 @@ func (s *service) GetMessagesByThreadID(
 			s.redisP.SetEX(ctx, cacheKey, data, 5*time.Minute)
 		}
 	}
+
 	return messages, total, nil
 }
 
@@ -170,14 +181,17 @@ func (s *service) GetMessageByID(ctx context.Context, id uint64) (*Message, erro
 			return &message, nil
 		}
 	}
+
 	message, err := s.repo.GetMessageByID(id)
 	if err != nil {
 		return nil, err
 	}
+
 	data, err := json.Marshal(message)
 	if err == nil {
 		s.redisP.SetEX(ctx, cacheKey, data, 5*time.Minute)
 	}
+
 	return message, nil
 }
 
@@ -186,6 +200,7 @@ func (s *service) invalidateCache(threadID uint64) {
 	pattern := fmt.Sprintf("%s:%d:page:*", s.cachePrefix, threadID)
 	var cursor uint64
 	deletedCount := 0
+
 	for {
 		keys, cur, err := s.redisP.Scan(ctx, cursor, pattern, 100).Result()
 		if err != nil {
@@ -205,6 +220,7 @@ func (s *service) invalidateCache(threadID uint64) {
 		}
 		cursor = cur
 	}
+
 	if deletedCount > 0 {
 		s.logger.Debugw("Message list cache invalidated", "thread_id", threadID, "deleted_keys", deletedCount)
 	}

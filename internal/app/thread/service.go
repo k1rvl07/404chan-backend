@@ -1,15 +1,16 @@
 package thread
 
 import (
-	"backend/internal/app/session"
-	"backend/internal/app/user"
-	"backend/internal/providers/redis"
-	"backend/internal/utils"
 	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 	"unicode/utf8"
+
+	"backend/internal/app/session"
+	"backend/internal/app/user"
+	"backend/internal/providers/redis"
+	"backend/internal/utils"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -21,6 +22,8 @@ type Service interface {
 	GetThreadByID(ctx context.Context, threadID uint64) (*Thread, error)
 	GetUserLastThreadTime(userID uint64) (*time.Time, error)
 	InvalidateThreadsCache(boardID uint64)
+	GetTopThreads(ctx context.Context, sort string, page, limit int) ([]*Thread, int64, error)
+	InvalidateTopThreadsCache()
 }
 
 type service struct {
@@ -145,6 +148,7 @@ func (s *service) CreateThread(
 	}
 
 	s.invalidateCache(boardID)
+	s.InvalidateTopThreadsCache()
 
 	eventData := map[string]interface{}{
 		"thread_id":       threadData.ID,
@@ -168,7 +172,6 @@ func (s *service) GetThreadsByBoardID(
 	sort string,
 	page, limit int,
 ) ([]*Thread, int64, error) {
-
 	validSorts := map[string]bool{"new": true, "popular": true, "active": true}
 	if !validSorts[sort] {
 		sort = "new"
@@ -205,7 +208,6 @@ func (s *service) GetThreadsByBoardID(
 		result.Total = total
 		data, err := json.Marshal(result)
 		if err == nil {
-
 			s.redisP.SetEX(ctx, cacheKey, data, 5*time.Minute)
 		}
 	}
@@ -231,7 +233,6 @@ func (s *service) GetThreadByID(ctx context.Context, threadID uint64) (*Thread, 
 	if threadData != nil {
 		data, err := json.Marshal(threadData)
 		if err == nil {
-
 			s.redisP.SetEX(ctx, cacheKey, data, 5*time.Minute)
 		}
 	}
@@ -268,5 +269,75 @@ func (s *service) invalidateCache(boardID uint64) {
 	}
 	if deletedCount > 0 {
 		s.logger.Debugw("Thread list cache invalidated", "board_id", boardID, "deleted_keys", deletedCount)
+	}
+}
+
+func (s *service) GetTopThreads(ctx context.Context, sort string, page, limit int) ([]*Thread, int64, error) {
+	validSorts := map[string]bool{"new": true, "popular": true, "active": true}
+	if !validSorts[sort] {
+		sort = "new"
+	}
+
+	if limit < 1 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	cacheKey := fmt.Sprintf("threads:top:sort:%s:page:%d:limit:%d", sort, page, limit)
+	cmd := s.redisP.Get(ctx, cacheKey)
+	cachedData, err := cmd.Result()
+	var result struct {
+		Threads []*Thread `json:"threads"`
+		Total   int64     `json:"total"`
+	}
+	if err == nil && cachedData != "" {
+		if json.Unmarshal([]byte(cachedData), &result) == nil {
+			return result.Threads, result.Total, nil
+		}
+	}
+
+	threads, total, err := s.repo.GetTopThreads(sort, page, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if len(threads) > 0 {
+		result.Threads = threads
+		result.Total = total
+		data, _ := json.Marshal(result)
+		s.redisP.SetEX(ctx, cacheKey, data, 5*time.Minute)
+	}
+
+	return threads, total, nil
+}
+
+func (s *service) InvalidateTopThreadsCache() {
+	ctx := context.Background()
+	pattern := "threads:top:sort:*"
+	var cursor uint64
+	deletedCount := 0
+	for {
+		keys, cur, err := s.redisP.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			s.logger.Warnw("Redis scan failed during top threads cache invalidation", "error", err, "pattern", pattern)
+			return
+		}
+		if len(keys) > 0 {
+			n, err := s.redisP.Del(ctx, keys...).Result()
+			if err != nil {
+				s.logger.Warnw("Failed to delete top threads cache keys", "error", err, "keys", keys)
+			} else {
+				deletedCount += int(n)
+			}
+		}
+		if cur == 0 {
+			break
+		}
+		cursor = cur
+	}
+	if deletedCount > 0 {
+		s.logger.Debugw("Top threads cache invalidated", "deleted_keys", deletedCount)
 	}
 }

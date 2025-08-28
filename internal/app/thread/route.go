@@ -9,5 +9,6 @@ func RegisterRoutes(rg *gin.RouterGroup, handler Handler) {
 		threads.GET("/:board_id", handler.GetThreadsByBoardID)
 		threads.GET("/cooldown", handler.GetThreadCooldown)
 		threads.GET("/thread/:id", handler.GetThreadByID)
+		threads.GET("/top", handler.GetTopThreads)
 	}
 }
