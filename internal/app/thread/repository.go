@@ -13,6 +13,7 @@ type Repository interface {
 	GetUserLastThreadTime(userID uint64) (*time.Time, error)
 	GetTotalThreadsCount(boardID uint64) (int64, error)
 	GetTopThreads(sort string, page, limit int) ([]*Thread, int64, error)
+	GetTopThreadsFiltered(sort string, page, limit int) ([]*Thread, int64, error)
 }
 
 type repository struct {
@@ -53,9 +54,7 @@ func (r *repository) GetThreadsByBoardID(boardID uint64, sort string, last24Hour
 	}
 
 	offset := (page - 1) * limit
-	query = query.Offset(offset).Limit(limit)
-
-	query = query.Group("threads.id, boards.slug, users.id, threads_activity.message_count, threads_activity.bump_at")
+	query = query.Offset(offset).Limit(limit).Group("threads.id, boards.slug, users.id, threads_activity.message_count, threads_activity.bump_at")
 
 	if err := query.Find(&threads).Error; err != nil {
 		return nil, 0, err
@@ -114,6 +113,41 @@ func (r *repository) GetTopThreads(sort string, page, limit int) ([]*Thread, int
 		Joins("JOIN users ON users.id = sessions.user_id").
 		Joins("JOIN boards ON boards.id = threads.board_id").
 		Joins("LEFT JOIN threads_activity ON threads_activity.thread_id = threads.id")
+
+	switch sort {
+	case "popular":
+		query = query.Order("threads_activity.message_count DESC")
+	case "active":
+		query = query.Order("threads_activity.bump_at DESC")
+	default:
+		query = query.Order("threads.created_at DESC")
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
+	query = query.Offset(offset).Limit(limit).Group("threads.id, boards.slug, users.id, threads_activity.message_count, threads_activity.bump_at")
+
+	if err := query.Find(&threads).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return threads, total, nil
+}
+
+func (r *repository) GetTopThreadsFiltered(sort string, page, limit int) ([]*Thread, int64, error) {
+	var threads []*Thread
+
+	query := r.db.Table("threads").
+		Select("threads.id, threads.board_id, boards.slug as board_slug, threads.title, threads.content, threads.created_at, threads.updated_at, users.id as created_by, threads.author_nickname as author_nickname, COALESCE(threads_activity.message_count, 0) as messages_count, threads_activity.bump_at").
+		Joins("JOIN sessions ON sessions.id = threads.created_by_session_id").
+		Joins("JOIN users ON users.id = sessions.user_id").
+		Joins("JOIN boards ON boards.id = threads.board_id").
+		Joins("LEFT JOIN threads_activity ON threads_activity.thread_id = threads.id").
+		Where("threads.created_at > NOW() - INTERVAL '24 hours'")
 
 	switch sort {
 	case "popular":

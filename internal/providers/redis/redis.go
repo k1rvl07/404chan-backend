@@ -152,11 +152,14 @@ func (h *loggerHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 			"duration_ms", duration.Milliseconds(),
 			"duration", duration.String(),
 		}
-		if err != nil {
-			fields = append(fields, "error", err)
-		}
 
 		if err != nil {
+			if err == redis.Nil {
+				fields = append(fields, "error", "redis: nil")
+				h.provider.logger.Debugw("Redis command returned nil (not found)", fields...)
+				return err
+			}
+			fields = append(fields, "error", err)
 			h.provider.logger.Errorw("Redis command failed", fields...)
 		} else {
 			h.provider.logger.Debugw("Redis command executed", fields...)

@@ -285,7 +285,7 @@ func (s *service) GetTopThreads(ctx context.Context, sort string, page, limit in
 		limit = 50
 	}
 
-	cacheKey := fmt.Sprintf("threads:top:sort:%s:page:%d:limit:%d", sort, page, limit)
+	cacheKey := fmt.Sprintf("threads:top:sort:%s:page:%d:limit:%d:24h", sort, page, limit)
 	cmd := s.redisP.Get(ctx, cacheKey)
 	cachedData, err := cmd.Result()
 	var result struct {
@@ -298,7 +298,7 @@ func (s *service) GetTopThreads(ctx context.Context, sort string, page, limit in
 		}
 	}
 
-	threads, total, err := s.repo.GetTopThreads(sort, page, limit)
+	threads, total, err := s.repo.GetTopThreadsFiltered(sort, page, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -315,7 +315,7 @@ func (s *service) GetTopThreads(ctx context.Context, sort string, page, limit in
 
 func (s *service) InvalidateTopThreadsCache() {
 	ctx := context.Background()
-	pattern := "threads:top:sort:*"
+	pattern := "threads:top:sort:*:page:*:limit:*:24h"
 	var cursor uint64
 	deletedCount := 0
 	for {
