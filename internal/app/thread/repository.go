@@ -14,6 +14,7 @@ type Repository interface {
 	GetTotalThreadsCount(boardID uint64) (int64, error)
 	GetTopThreads(sort string, page, limit int) ([]*Thread, int64, error)
 	GetTopThreadsFiltered(sort string, page, limit int) ([]*Thread, int64, error)
+	IsUserThreadAuthor(userID uint64, threadID uint64) (bool, error)
 }
 
 type repository struct {
@@ -28,7 +29,19 @@ func (r *repository) GetThreadsByBoardID(boardID uint64, sort string, last24Hour
 	var threads []*Thread
 
 	query := r.db.Table("threads").
-		Select("threads.id, threads.board_id, boards.slug as board_slug, threads.title, threads.content, threads.created_at, threads.updated_at, users.id as created_by, threads.author_nickname as author_nickname, COALESCE(threads_activity.message_count, 0) as messages_count, threads_activity.bump_at").
+		Select(`
+			threads.id, 
+			threads.board_id, 
+			boards.slug as board_slug, 
+			threads.title, 
+			threads.content, 
+			threads.created_at, 
+			threads.updated_at, 
+			users.id as created_by, 
+			threads.author_nickname as author_nickname, 
+			COALESCE(threads_activity.message_count, 0) as messages_count, 
+			threads_activity.bump_at
+		`).
 		Joins("JOIN sessions ON sessions.id = threads.created_by_session_id").
 		Joins("JOIN users ON users.id = sessions.user_id").
 		Joins("JOIN boards ON boards.id = threads.board_id").
@@ -66,7 +79,12 @@ func (r *repository) GetThreadsByBoardID(boardID uint64, sort string, last24Hour
 func (r *repository) GetThreadByID(id uint64) (*Thread, error) {
 	var thread Thread
 	err := r.db.Table("threads").
-		Select("threads.*, boards.slug as board_slug, threads.author_nickname as author_nickname").
+		Select(`
+			threads.*, 
+			boards.slug as board_slug, 
+			threads.author_nickname as author_nickname,
+			users.id as created_by
+		`).
 		Joins("JOIN sessions ON sessions.id = threads.created_by_session_id").
 		Joins("JOIN users ON users.id = sessions.user_id").
 		Joins("JOIN boards ON boards.id = threads.board_id").
@@ -83,16 +101,15 @@ func (r *repository) GetUserLastThreadTime(userID uint64) (*time.Time, error) {
 	err := r.db.Model(&Thread{}).
 		Select("MAX(threads.created_at)").
 		Joins("JOIN sessions ON sessions.id = threads.created_by_session_id").
-		Where("sessions.user_id = ?", userID).
+		Joins("JOIN users ON users.id = sessions.user_id").
+		Where("users.id = ?", userID).
 		Scan(&nullTime).Error
 	if err != nil {
 		return nil, err
 	}
-
 	if !nullTime.Valid {
 		return nil, nil
 	}
-
 	return &nullTime.Time, nil
 }
 
@@ -108,7 +125,19 @@ func (r *repository) GetTopThreads(sort string, page, limit int) ([]*Thread, int
 	var threads []*Thread
 
 	query := r.db.Table("threads").
-		Select("threads.id, threads.board_id, boards.slug as board_slug, threads.title, threads.content, threads.created_at, threads.updated_at, users.id as created_by, threads.author_nickname as author_nickname, COALESCE(threads_activity.message_count, 0) as messages_count, threads_activity.bump_at").
+		Select(`
+			threads.id, 
+			threads.board_id, 
+			boards.slug as board_slug, 
+			threads.title, 
+			threads.content, 
+			threads.created_at, 
+			threads.updated_at, 
+			users.id as created_by, 
+			threads.author_nickname as author_nickname, 
+			COALESCE(threads_activity.message_count, 0) as messages_count, 
+			threads_activity.bump_at
+		`).
 		Joins("JOIN sessions ON sessions.id = threads.created_by_session_id").
 		Joins("JOIN users ON users.id = sessions.user_id").
 		Joins("JOIN boards ON boards.id = threads.board_id").
@@ -142,7 +171,19 @@ func (r *repository) GetTopThreadsFiltered(sort string, page, limit int) ([]*Thr
 	var threads []*Thread
 
 	query := r.db.Table("threads").
-		Select("threads.id, threads.board_id, boards.slug as board_slug, threads.title, threads.content, threads.created_at, threads.updated_at, users.id as created_by, threads.author_nickname as author_nickname, COALESCE(threads_activity.message_count, 0) as messages_count, threads_activity.bump_at").
+		Select(`
+			threads.id, 
+			threads.board_id, 
+			boards.slug as board_slug, 
+			threads.title, 
+			threads.content, 
+			threads.created_at, 
+			threads.updated_at, 
+			users.id as created_by, 
+			threads.author_nickname as author_nickname, 
+			COALESCE(threads_activity.message_count, 0) as messages_count, 
+			threads_activity.bump_at
+		`).
 		Joins("JOIN sessions ON sessions.id = threads.created_by_session_id").
 		Joins("JOIN users ON users.id = sessions.user_id").
 		Joins("JOIN boards ON boards.id = threads.board_id").
@@ -171,4 +212,19 @@ func (r *repository) GetTopThreadsFiltered(sort string, page, limit int) ([]*Thr
 	}
 
 	return threads, total, nil
+}
+
+func (r *repository) IsUserThreadAuthor(userID uint64, threadID uint64) (bool, error) {
+	var count int64
+	err := r.db.Table("threads").
+		Joins("JOIN sessions ON sessions.id = threads.created_by_session_id").
+		Joins("JOIN users ON users.id = sessions.user_id").
+		Where("threads.id = ? AND users.id = ?", threadID, userID).
+		Count(&count).Error
+
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
 }

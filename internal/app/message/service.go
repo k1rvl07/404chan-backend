@@ -3,7 +3,6 @@ package message
 import (
 	"backend/internal/app/session"
 	"backend/internal/app/thread"
-	"backend/internal/app/user"
 	"backend/internal/providers/redis"
 	"backend/internal/utils"
 	"context"
@@ -17,7 +16,7 @@ import (
 )
 
 type Service interface {
-	CreateMessage(ctx context.Context, threadID uint64, sessionKey string, content string, parentID *uint64) (*Message, error)
+	CreateMessage(ctx context.Context, threadID uint64, sessionKey string, content string, parentID *uint64, showAsAuthor bool) (*Message, error)
 	GetMessagesByThreadID(ctx context.Context, threadID uint64, page int, limit int) ([]*Message, int64, error)
 	GetUserLastMessageTime(userID uint64) (*time.Time, error)
 	GetMessageCooldown(userID uint64) (*time.Time, error)
@@ -27,7 +26,6 @@ type Service interface {
 type service struct {
 	repo        Repository
 	sessionSvc  session.Service
-	userSvc     user.Service
 	threadSvc   thread.Service
 	dbConn      *gorm.DB
 	redisP      *redis.RedisProvider
@@ -39,7 +37,6 @@ type service struct {
 func NewService(
 	repo Repository,
 	sessionSvc session.Service,
-	userSvc user.Service,
 	threadSvc thread.Service,
 	dbConn *gorm.DB,
 	redisP *redis.RedisProvider,
@@ -49,7 +46,6 @@ func NewService(
 	return &service{
 		repo:        repo,
 		sessionSvc:  sessionSvc,
-		userSvc:     userSvc,
 		threadSvc:   threadSvc,
 		dbConn:      dbConn,
 		redisP:      redisP,
@@ -73,6 +69,7 @@ func (s *service) CreateMessage(
 	sessionKey string,
 	content string,
 	parentID *uint64,
+	showAsAuthor bool,
 ) (*Message, error) {
 	contentLength := utf8.RuneCountInString(content)
 	if contentLength < 1 || contentLength > 9999 {
@@ -101,21 +98,33 @@ func (s *service) CreateMessage(
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
 
-	message, err := s.repo.CreateMessage(threadID, session.ID, parentID, content, user.Nickname)
+	thread, err := s.threadSvc.GetThreadByID(ctx, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get thread: %w", err)
+	}
+
+	isThreadAuthor, err := s.threadSvc.IsUserAuthor(ctx, user.ID, threadID)
+	if err != nil {
+		s.logger.Warnw("Failed to check thread authorship", "error", err, "user_id", user.ID, "thread_id", threadID)
+		isThreadAuthor = false
+	}
+
+	isAuthor := showAsAuthor && isThreadAuthor
+
+	nickname := user.Nickname
+	if nickname == "" {
+		nickname = "Аноним"
+	}
+
+	message, err := s.repo.CreateMessage(threadID, session.ID, parentID, content, nickname, isAuthor)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create message: %w", err)
 	}
 
 	s.invalidateCache(threadID)
-
 	if s.threadSvc != nil {
-		thread, err := s.threadSvc.GetThreadByID(ctx, threadID)
-		if err != nil {
-			s.logger.Errorw("Failed to get thread for cache invalidation", "error", err, "thread_id", threadID)
-		} else {
-			s.threadSvc.InvalidateThreadsCache(thread.BoardID)
-			s.threadSvc.InvalidateTopThreadsCache()
-		}
+		s.threadSvc.InvalidateThreadsCache(thread.BoardID)
+		s.threadSvc.InvalidateTopThreadsCache()
 	}
 
 	eventData := map[string]interface{}{
@@ -125,6 +134,7 @@ func (s *service) CreateMessage(
 		"created_at":      message.CreatedAt,
 		"updated_at":      message.UpdatedAt,
 		"author_nickname": message.AuthorNickname,
+		"is_author":       message.IsAuthor,
 		"user_id":         user.ID,
 		"timestamp":       time.Now().UTC().Unix(),
 	}
@@ -153,6 +163,7 @@ func (s *service) GetMessagesByThreadID(
 		Messages []*Message `json:"messages"`
 		Total    int64      `json:"total"`
 	}
+
 	if err == nil && cachedData != "" {
 		if json.Unmarshal([]byte(cachedData), &result) == nil {
 			return result.Messages, result.Total, nil
@@ -167,10 +178,8 @@ func (s *service) GetMessagesByThreadID(
 	if len(messages) > 0 {
 		result.Messages = messages
 		result.Total = total
-		data, err := json.Marshal(result)
-		if err == nil {
-			s.redisP.SetEX(ctx, cacheKey, data, 5*time.Minute)
-		}
+		data, _ := json.Marshal(result)
+		s.redisP.SetEX(ctx, cacheKey, data, 5*time.Minute)
 	}
 
 	return messages, total, nil
@@ -180,6 +189,7 @@ func (s *service) GetMessageByID(ctx context.Context, id uint64) (*Message, erro
 	cacheKey := fmt.Sprintf("%s:message:%d", s.cachePrefix, id)
 	cmd := s.redisP.Get(ctx, cacheKey)
 	cachedData, err := cmd.Result()
+
 	if err == nil && cachedData != "" {
 		var message Message
 		if json.Unmarshal([]byte(cachedData), &message) == nil {
@@ -192,10 +202,8 @@ func (s *service) GetMessageByID(ctx context.Context, id uint64) (*Message, erro
 		return nil, err
 	}
 
-	data, err := json.Marshal(message)
-	if err == nil {
-		s.redisP.SetEX(ctx, cacheKey, data, 5*time.Minute)
-	}
+	data, _ := json.Marshal(message)
+	s.redisP.SetEX(ctx, cacheKey, data, 5*time.Minute)
 
 	return message, nil
 }
@@ -212,6 +220,7 @@ func (s *service) invalidateCache(threadID uint64) {
 			s.logger.Warnw("Redis scan failed during cache invalidation", "error", err, "pattern", pattern)
 			return
 		}
+
 		if len(keys) > 0 {
 			n, err := s.redisP.Del(ctx, keys...).Result()
 			if err != nil {
@@ -220,9 +229,11 @@ func (s *service) invalidateCache(threadID uint64) {
 				deletedCount += int(n)
 			}
 		}
+
 		if cur == 0 {
 			break
 		}
+
 		cursor = cur
 	}
 

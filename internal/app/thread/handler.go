@@ -16,6 +16,7 @@ type Handler interface {
 	GetThreadCooldown(c *gin.Context)
 	GetThreadByID(c *gin.Context)
 	GetTopThreads(c *gin.Context)
+	CheckThreadAuthor(c *gin.Context)
 }
 
 type handler struct {
@@ -188,4 +189,33 @@ func (h *handler) GetTopThreads(c *gin.Context) {
 			"totalPages": totalPages,
 		},
 	})
+}
+
+func (h *handler) CheckThreadAuthor(c *gin.Context) {
+	threadIDStr := c.Param("thread_id")
+	threadID, err := strconv.ParseUint(threadIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid thread ID"})
+		return
+	}
+
+	sessionKey := c.Query("session_key")
+	if sessionKey == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "session_key is required"})
+		return
+	}
+
+	user, err := h.sessionSvc.GetUserBySessionKey(sessionKey)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	isAuthor, err := h.service.IsUserAuthor(c.Request.Context(), user.ID, threadID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check authorship"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"is_author": isAuthor})
 }

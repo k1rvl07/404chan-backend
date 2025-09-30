@@ -8,7 +8,7 @@ import (
 )
 
 type Repository interface {
-	CreateMessage(threadID uint64, sessionID uint64, parentID *uint64, content string, authorNickname string) (*Message, error)
+	CreateMessage(threadID uint64, sessionID uint64, parentID *uint64, content string, authorNickname string, isAuthor bool) (*Message, error)
 	GetMessagesByThreadID(threadID uint64, page int, limit int) ([]*Message, int64, error)
 	GetUserLastMessageTime(userID uint64) (*time.Time, error)
 	GetMessageByID(id uint64) (*Message, error)
@@ -28,6 +28,7 @@ func (r *repository) CreateMessage(
 	parentID *uint64,
 	content string,
 	authorNickname string,
+	isAuthor bool,
 ) (*Message, error) {
 	message := &Message{
 		ThreadID:           threadID,
@@ -35,37 +36,34 @@ func (r *repository) CreateMessage(
 		ParentID:           parentID,
 		Content:            content,
 		AuthorNickname:     authorNickname,
+		IsAuthor:           isAuthor,
 		CreatedAt:          time.Now(),
 		UpdatedAt:          time.Now(),
 	}
-
 	result := r.db.Create(message)
 	if result.Error != nil {
 		return nil, result.Error
 	}
-
 	return message, nil
 }
 
 func (r *repository) GetMessagesByThreadID(threadID uint64, page int, limit int) ([]*Message, int64, error) {
 	var messages []*Message
 	var total int64
-
 	offset := (page - 1) * limit
 
-	if err := r.db.Table("messages").
-		Select("messages.*, users.nickname as author_nickname").
-		Joins("JOIN sessions ON sessions.id = messages.created_by_session_id").
-		Joins("JOIN users ON users.id = sessions.user_id").
+	err := r.db.Table("messages").
 		Where("messages.thread_id = ?", threadID).
 		Order("messages.created_at DESC").
 		Offset(offset).
 		Limit(limit).
-		Find(&messages).Error; err != nil {
+		Find(&messages).Error
+	if err != nil {
 		return nil, 0, err
 	}
 
-	if err := r.db.Model(&Message{}).Where("thread_id = ?", threadID).Count(&total).Error; err != nil {
+	err = r.db.Model(&Message{}).Where("thread_id = ?", threadID).Count(&total).Error
+	if err != nil {
 		return nil, 0, err
 	}
 
@@ -82,20 +80,15 @@ func (r *repository) GetUserLastMessageTime(userID uint64) (*time.Time, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	if !lastMessageTime.Valid {
 		return nil, nil
 	}
-
 	return &lastMessageTime.Time, nil
 }
 
 func (r *repository) GetMessageByID(id uint64) (*Message, error) {
 	var message Message
 	err := r.db.Table("messages").
-		Select("messages.*, users.nickname as author_nickname").
-		Joins("JOIN sessions ON sessions.id = messages.created_by_session_id").
-		Joins("JOIN users ON users.id = sessions.user_id").
 		Where("messages.id = ?", id).
 		First(&message).Error
 	if err != nil {

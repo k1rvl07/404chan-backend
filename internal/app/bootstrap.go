@@ -42,7 +42,7 @@ func Bootstrap(cfg *config.Config, logger *zap.Logger) (*Application, error) {
 	userService := user.NewService(userRepo, sessionService, redisProvider, logger)
 	boardService := board.NewService(boardRepo)
 	threadService := thread.NewService(threadRepo, sessionService, userService, dbConn, redisProvider, eventBus, logger)
-	messageService := message.NewService(messageRepo, sessionService, userService, threadService, dbConn, redisProvider, eventBus, logger)
+	messageService := message.NewService(messageRepo, sessionService, threadService, dbConn, redisProvider, eventBus, logger)
 
 	hub := websocket.NewHub(logger, sessionService, eventBus, userRepo, redisProvider)
 	go hub.Run()
@@ -55,7 +55,7 @@ func Bootstrap(cfg *config.Config, logger *zap.Logger) (*Application, error) {
 	userHandler := user.NewHandler(userService, sessionService, eventBus, logger, redisProvider)
 	boardHandler := board.NewHandler(boardService)
 	threadHandler := thread.NewHandler(threadService, sessionService, userService)
-	messageHandler := message.NewHandler(messageService, sessionService, userService)
+	messageHandler := message.NewHandler(messageService, sessionService)
 
 	r := router.NewRouter(logger)
 

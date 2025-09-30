@@ -24,6 +24,7 @@ type Service interface {
 	InvalidateThreadsCache(boardID uint64)
 	GetTopThreads(ctx context.Context, sort string, page, limit int) ([]*Thread, int64, error)
 	InvalidateTopThreadsCache()
+	IsUserAuthor(ctx context.Context, userID uint64, threadID uint64) (bool, error)
 }
 
 type service struct {
@@ -340,4 +341,8 @@ func (s *service) InvalidateTopThreadsCache() {
 	if deletedCount > 0 {
 		s.logger.Debugw("Top threads cache invalidated", "deleted_keys", deletedCount)
 	}
+}
+
+func (s *service) IsUserAuthor(ctx context.Context, userID uint64, threadID uint64) (bool, error) {
+	return s.repo.IsUserThreadAuthor(userID, threadID)
 }

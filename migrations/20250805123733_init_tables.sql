@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL CHECK (LENGTH(content) >= 1 AND LENGTH(content) <= 9999),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    author_nickname VARCHAR(16) NOT NULL DEFAULT 'Аноним' CHECK (LENGTH(author_nickname) >= 1 AND LENGTH(author_nickname) <= 16)
+    author_nickname VARCHAR(16) NOT NULL DEFAULT 'Аноним' CHECK (LENGTH(author_nickname) >= 1 AND LENGTH(author_nickname) <= 16),
+    is_author BOOLEAN NOT NULL DEFAULT FALSE
 );
 CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages (thread_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_by_session ON messages (created_by_session_id);

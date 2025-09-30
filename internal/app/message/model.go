@@ -11,4 +11,5 @@ type Message struct {
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 	AuthorNickname     string    `json:"author_nickname"`
+	IsAuthor           bool      `json:"is_author"`
 }
