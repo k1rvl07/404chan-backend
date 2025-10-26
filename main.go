@@ -1,7 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"backend/internal/app"
 	"backend/internal/config"
@@ -33,9 +39,30 @@ func main() {
 		logger.Fatal("Failed to bootstrap application", zap.Error(err))
 	}
 
-	logger.Info("Server started", zap.String("addr", "localhost:"+cfg.ServerPort))
-
-	if err := application.Router.Serve(":" + cfg.ServerPort); err != nil {
-		logger.Fatal("Server stopped with error", zap.Error(err))
+	addr := ":" + cfg.ServerPort
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: application.Router.Engine,
 	}
+
+	go func() {
+		logger.Info("Server started", zap.String("addr", "localhost"+addr))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatal("Server stopped with error", zap.Error(err))
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	logger.Info("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Fatal("Server forced to shutdown", zap.Error(err))
+	}
+
+	logger.Info("Server exited gracefully")
 }
