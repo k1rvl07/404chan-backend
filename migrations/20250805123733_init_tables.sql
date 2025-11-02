@@ -154,6 +154,18 @@ CREATE TRIGGER trigger_create_threads_activity_on_thread
     AFTER INSERT ON threads
     FOR EACH ROW
     EXECUTE FUNCTION create_threads_activity_on_thread();
+
+INSERT INTO boards (slug, title, description) VALUES
+('b', 'Random', 'Обсуждение на любые темы'),
+('vg', 'Video Games', 'Обсуждение видеоигр'),
+('a', 'Anime & Manga', 'Аниме и манга'),
+('mu', 'Music', 'Музыка'),
+('tv', 'Television & Film', 'Фильмы и сериалы'),
+('fit', 'Fitness', 'Спорт и фитнес'),
+('sci', 'Science', 'Наука и технологии'),
+('g', 'Technology', 'Технологии и программирование'),
+('news', 'News', 'Новости и события')
+ON CONFLICT (slug) DO NOTHING;
 -- +goose StatementEnd
 
 -- +goose Down

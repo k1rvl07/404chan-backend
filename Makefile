@@ -1,4 +1,4 @@
-DB_URL = host=localhost user=postgres password=root dbname=404chan port=5432 sslmode=disable
+DB_URL = host=localhost user=postgres_admin password=admin_password dbname=db_404chan port=5432 sslmode=disable
 MIGRATIONS_DIR = migrations
 DRIVER = postgres
 

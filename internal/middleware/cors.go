@@ -15,7 +15,7 @@ func CORSMiddleware() gin.HandlerFunc {
 	var allowedOrigins []string
 
 	if origin == "" {
-		allowedOrigins = []string{"http://localhost:3000"}
+		allowedOrigins = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
 	} else {
 		allowedOrigins = strings.Split(origin, ",")
 		for i := range allowedOrigins {
