@@ -19,12 +19,10 @@ type RedisProvider struct {
 }
 
 func NewRedisProvider(redisURL string, logger *zap.Logger, ttl time.Duration) *RedisProvider {
-	opts, err := redis.ParseURL(redisURL)
-	if err != nil {
-		opts = &redis.Options{
-			Addr: redisURL,
-			DB:   0,
-		}
+	opts := &redis.Options{
+		Addr:    redisURL,
+		DB:      0,
+		Network: "tcp4",
 	}
 
 	client := redis.NewClient(opts)

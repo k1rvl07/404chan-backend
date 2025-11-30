@@ -15,6 +15,8 @@ vendor/
 go.mod.sum
 go.sum.lock
 /go/cache/
+.config/
+.cache/
 
 *.out
 *.prof

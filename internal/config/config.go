@@ -26,13 +26,13 @@ func LoadConfig() Config {
 	}
 
 	return Config{
-		DBHost:     getEnv("DB_HOST", "localhost"),
+		DBHost:     getEnv("DB_HOST", "postgres"),
 		DBPort:     getEnv("DB_PORT", "5432"),
 		DBUser:     getEnv("DB_USER", "postgres"),
 		DBPass:     getEnv("DB_PASS", "password"),
-		DBName:     getEnv("DB_NAME", "myappibhl"),
+		DBName:     getEnv("DB_NAME", "db_404chan"),
 		ServerPort: getEnv("SERVER_PORT", "8080"),
-		RedisURL:   getEnv("REDIS_URL", "localhost:6379"),
+		RedisURL:   getEnv("REDIS_URL", "redis:6379"),
 		Env:        getEnv("ENV", "dev"),
 		RedisTTL:   ttl,
 	}
