@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,9 +27,15 @@ type MinioProvider struct {
 }
 
 func NewMinioProvider(cfg *config.Config, logger *zap.Logger) (*MinioProvider, error) {
+	u, err := url.Parse(cfg.MinioURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse minio URL: %w", err)
+	}
+	secure := u.Scheme == "https"
+
 	client, err := minio.New(cfg.MinioURL, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.MinioUser, cfg.MinioPassword, ""),
-		Secure: false,
+		Secure: secure,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create minio client: %w", err)
