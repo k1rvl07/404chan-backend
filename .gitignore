@@ -70,7 +70,6 @@ logs/
 log/
 
 data/
-minio/
 
 !go.mod
 !go.sum
