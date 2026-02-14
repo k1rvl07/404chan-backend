@@ -7,10 +7,11 @@ RUN apk add --no-cache git make postgresql-client ca-certificates curl
 COPY go.mod go.sum ./
 RUN go mod download
 
-RUN go install github.com/pressly/goose/v3/cmd/goose@latest && \
-    go install github.com/air-verse/air@latest
+RUN go install github.com/air-verse/air@latest
 
 COPY . .
-RUN go build -ldflags="-w -s" -o /main .
+RUN go build -buildvcs=false -ldflags="-w -s" -o /main .
 
-CMD ["sleep", "infinity"]
+EXPOSE 8080
+
+CMD ["air"]

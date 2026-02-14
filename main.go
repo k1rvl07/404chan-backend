@@ -9,12 +9,24 @@ import (
 	"syscall"
 	"time"
 
+	_ "backend/docs"
+
 	"backend/internal/app"
 	"backend/internal/config"
 	"backend/internal/utils"
 
 	"go.uber.org/zap"
 )
+
+// @title 404chan API
+// @version 1.0
+// @description API for 404chan imageboard application
+// @host localhost:8080
+// @BasePath /api
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
 
 func main() {
 	logger, err := utils.NewLogger()
@@ -45,12 +57,10 @@ func main() {
 		Handler: application.Router.Engine,
 	}
 
-	go func() {
-		logger.Info("Server started", zap.String("addr", "localhost"+addr))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("Server stopped with error", zap.Error(err))
-		}
-	}()
+	logger.Info("Server started", zap.String("addr", "localhost"+addr))
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Fatal("Server stopped with error", zap.Error(err))
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

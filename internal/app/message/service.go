@@ -1,8 +1,10 @@
 package message
 
 import (
+	"backend/internal/app/attachment"
 	"backend/internal/app/session"
 	"backend/internal/app/thread"
+	"backend/internal/providers/minio"
 	"backend/internal/providers/redis"
 	"backend/internal/utils"
 	"context"
@@ -16,7 +18,7 @@ import (
 )
 
 type Service interface {
-	CreateMessage(ctx context.Context, threadID uint64, sessionKey string, content string, parentID *uint64, showAsAuthor bool) (*Message, error)
+	CreateMessage(ctx context.Context, threadID uint64, sessionKey string, content string, parentID *uint64, showAsAuthor bool, attachmentIDs []string) (*Message, error)
 	GetMessagesByThreadID(ctx context.Context, threadID uint64, page int, limit int) ([]*Message, int64, error)
 	GetUserLastMessageTime(userID uint64) (*time.Time, error)
 	GetMessageCooldown(userID uint64) (*time.Time, error)
@@ -24,14 +26,16 @@ type Service interface {
 }
 
 type service struct {
-	repo        Repository
-	sessionSvc  session.Service
-	threadSvc   thread.Service
-	dbConn      *gorm.DB
-	redisP      *redis.RedisProvider
-	eventBus    *utils.EventBus
-	logger      *zap.SugaredLogger
-	cachePrefix string
+	repo          Repository
+	sessionSvc    session.Service
+	threadSvc     thread.Service
+	dbConn        *gorm.DB
+	redisP        *redis.RedisProvider
+	minioP        *minio.MinioProvider
+	eventBus      *utils.EventBus
+	logger        *zap.SugaredLogger
+	cachePrefix   string
+	attachmentSvc attachment.Service
 }
 
 func NewService(
@@ -42,16 +46,20 @@ func NewService(
 	redisP *redis.RedisProvider,
 	eventBus *utils.EventBus,
 	logger *zap.Logger,
+	minioP *minio.MinioProvider,
+	attachmentSvc attachment.Service,
 ) Service {
 	return &service{
-		repo:        repo,
-		sessionSvc:  sessionSvc,
-		threadSvc:   threadSvc,
-		dbConn:      dbConn,
-		redisP:      redisP,
-		eventBus:    eventBus,
-		logger:      logger.Sugar(),
-		cachePrefix: "messages:thread",
+		repo:          repo,
+		sessionSvc:    sessionSvc,
+		threadSvc:     threadSvc,
+		dbConn:        dbConn,
+		redisP:        redisP,
+		minioP:        minioP,
+		eventBus:      eventBus,
+		logger:        logger.Sugar(),
+		cachePrefix:   "messages:thread",
+		attachmentSvc: attachmentSvc,
 	}
 }
 
@@ -70,6 +78,7 @@ func (s *service) CreateMessage(
 	content string,
 	parentID *uint64,
 	showAsAuthor bool,
+	attachmentIDs []string,
 ) (*Message, error) {
 	contentLength := utf8.RuneCountInString(content)
 	if contentLength < 1 || contentLength > 9999 {
@@ -121,11 +130,37 @@ func (s *service) CreateMessage(
 		return nil, fmt.Errorf("failed to create message: %w", err)
 	}
 
+	if len(attachmentIDs) > 0 && s.attachmentSvc != nil {
+		if err := s.attachmentSvc.LinkToMessageByFileID(ctx, attachmentIDs, message.ID); err != nil {
+			s.logger.Warn("Failed to link attachments to message", zap.Uint64("message_id", message.ID), zap.Error(err))
+		}
+	}
+
+	s.dbConn.Exec(`
+		INSERT INTO user_activity (user_id, message_count, created_at, updated_at)
+		VALUES (?, 1, NOW(), NOW())
+		ON CONFLICT (user_id) DO UPDATE SET
+			message_count = user_activity.message_count + 1,
+			updated_at = NOW()
+	`, user.ID)
+
+	s.dbConn.Exec(`
+		INSERT INTO threads_activity (thread_id, message_count, bump_at, created_at, updated_at)
+		VALUES (?, 1, NOW(), NOW(), NOW())
+		ON CONFLICT (thread_id) DO UPDATE SET
+			message_count = threads_activity.message_count + 1,
+			bump_at = NOW(),
+			updated_at = NOW()
+	`, threadID)
+
 	s.invalidateCache(threadID)
 	if s.threadSvc != nil {
 		s.threadSvc.InvalidateThreadsCache(thread.BoardID)
 		s.threadSvc.InvalidateTopThreadsCache()
 	}
+
+	userCacheKey := fmt.Sprintf("user:session:%s", sessionKey)
+	s.redisP.Del(context.Background(), userCacheKey)
 
 	eventData := map[string]interface{}{
 		"message_id":      message.ID,
@@ -175,6 +210,27 @@ func (s *service) GetMessagesByThreadID(
 		return nil, 0, fmt.Errorf("failed to get messages: %w", err)
 	}
 
+	if len(messages) > 0 && s.attachmentSvc != nil {
+		for _, msg := range messages {
+			attachments, err := s.attachmentSvc.GetByMessageID(ctx, msg.ID)
+			if err == nil {
+				msg.Attachments = make([]*MessageAttachment, 0, len(attachments))
+				for _, att := range attachments {
+					msg.Attachments = append(msg.Attachments, &MessageAttachment{
+						ID:          att.FileID,
+						FileID:      att.FileID,
+						FileName:    att.FileName,
+						FileURL:     att.FileURL,
+						FileSize:    att.FileSize,
+						ContentType: att.ContentType,
+						ObjectName:  att.ObjectName,
+						CreatedAt:   att.CreatedAt.Format("2006-01-02T15:04:05Z"),
+					})
+				}
+			}
+		}
+	}
+
 	if len(messages) > 0 {
 		result.Messages = messages
 		result.Total = total
@@ -200,6 +256,25 @@ func (s *service) GetMessageByID(ctx context.Context, id uint64) (*Message, erro
 	message, err := s.repo.GetMessageByID(id)
 	if err != nil {
 		return nil, err
+	}
+
+	if message != nil && s.attachmentSvc != nil {
+		attachments, err := s.attachmentSvc.GetByMessageID(ctx, message.ID)
+		if err == nil {
+			message.Attachments = make([]*MessageAttachment, 0, len(attachments))
+			for _, att := range attachments {
+				message.Attachments = append(message.Attachments, &MessageAttachment{
+					ID:          att.FileID,
+					FileID:      att.FileID,
+					FileName:    att.FileName,
+					FileURL:     att.FileURL,
+					FileSize:    att.FileSize,
+					ContentType: att.ContentType,
+					ObjectName:  att.ObjectName,
+					CreatedAt:   att.CreatedAt.Format("2006-01-02T15:04:05Z"),
+				})
+			}
+		}
 	}
 
 	data, _ := json.Marshal(message)

@@ -45,11 +45,21 @@ func NewHandler(
 	}
 }
 
+// @Summary Get user profile
+// @Description Get user profile by session key
+// @Tags User
+// @Accept json
+// @Produce json
+// @Param session_key query string true "Session key"
+// @Success 200 {object} UserResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/user [get]
 func (h *handler) GetUser(c *gin.Context) {
 	sessionKey := c.Query("session_key")
 	if sessionKey == "" {
 		h.logger.Warnw("GetUser: session_key missing")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "session_key is required"})
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "session_key is required"})
 		return
 	}
 
@@ -57,7 +67,7 @@ func (h *handler) GetUser(c *gin.Context) {
 	userResp, err := h.service.GetUserWithSession(ctx, sessionKey)
 	if err != nil {
 		h.logger.Warnw("GetUser: failed to get user", "session_key", sessionKey, "error", err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: "user not found"})
 		return
 	}
 
@@ -65,43 +75,50 @@ func (h *handler) GetUser(c *gin.Context) {
 	c.JSON(http.StatusOK, userResp)
 }
 
+// @Summary Update user nickname
+// @Description Update user's nickname (1-16 alphanumeric characters)
+// @Tags User
+// @Accept json
+// @Produce json
+// @Param request body UpdateNicknameRequest true "Nickname update request"
+// @Success 200 {object} NicknameUpdateResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/user/nickname [patch]
 func (h *handler) UpdateNickname(c *gin.Context) {
-	var req struct {
-		SessionKey string `json:"session_key" binding:"required"`
-		Nickname   string `json:"nickname" binding:"required,min=1,max=16"`
-	}
+	var req UpdateNicknameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.Warnw("UpdateNickname: invalid request", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Ник должен быть 1-16 символов"})
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Ник должен быть 1-16 символов"})
 		return
 	}
 
 	matched, err := regexp.MatchString(`^[\p{L}\p{N}]+$`, req.Nickname)
 	if err != nil {
 		h.logger.Errorw("UpdateNickname: regex failed", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate nickname"})
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to validate nickname"})
 		return
 	}
 	if !matched {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Ник должен содержать только буквы и цифры (без пробелов и символов)"})
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Ник должен содержать только буквы и цифры (без пробелов и символов)"})
 		return
 	}
 
 	session, err := h.sessionSvc.GetSessionByKey(req.SessionKey)
 	if err != nil {
 		h.logger.Warnw("UpdateNickname: session not found", "session_key", req.SessionKey)
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: "session not found"})
 		return
 	}
 
 	if err := h.service.UpdateNickname(session.UserID, req.Nickname); err != nil {
 		if err.Error() == "nickname can only be changed once per minute" {
 			h.logger.Warnw("UpdateNickname: rate limited", "user_id", session.UserID)
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Менять ник можно не чаще раза в минуту"})
+			c.JSON(http.StatusTooManyRequests, ErrorResponse{Error: "Менять ник можно не чаще раза в минуту"})
 			return
 		}
 		h.logger.Errorw("UpdateNickname: failed to update in DB", "user_id", session.UserID, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update nickname"})
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to update nickname"})
 		return
 	}
 
@@ -117,36 +134,45 @@ func (h *handler) UpdateNickname(c *gin.Context) {
 	h.logger.Infow("UpdateNickname: publishing event", "event", "nickname_updated", "data", eventData)
 	h.eventBus.Publish("nickname_updated", eventData)
 
-	c.JSON(http.StatusOK, gin.H{
-		"ID":                     session.UserID,
-		"Nickname":               req.Nickname,
-		"CreatedAt":              time.Now().UTC().Format(time.RFC3339),
-		"SessionKey":             req.SessionKey,
-		"MessagesCount":          0,
-		"ThreadsCount":           0,
-		"LastNicknameChangeUnix": time.Now().UTC().Unix(),
+	c.JSON(http.StatusOK, NicknameUpdateResponse{
+		ID:                     session.UserID,
+		Nickname:               req.Nickname,
+		CreatedAt:              time.Now().UTC(),
+		SessionKey:             req.SessionKey,
+		MessagesCount:          0,
+		ThreadsCount:           0,
+		LastNicknameChangeUnix: time.Now().UTC().Unix(),
 	})
 }
 
+// @Summary Get nickname change cooldown
+// @Description Get the timestamp of the last nickname change
+// @Tags User
+// @Accept json
+// @Produce json
+// @Param session_key query string true "Session key"
+// @Success 200 {object} CooldownResponse
+// @Failure 401 {object} ErrorResponse
+// @Router /api/user/cooldown [get]
 func (h *handler) GetCooldown(c *gin.Context) {
 	sessionKey := c.Query("session_key")
 	if sessionKey == "" {
 		h.logger.Warnw("GetCooldown: session_key missing")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "session_key is required"})
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "session_key is required"})
 		return
 	}
 
 	session, err := h.sessionSvc.GetSessionByKey(sessionKey)
 	if err != nil {
 		h.logger.Warnw("GetCooldown: session not found", "session_key", sessionKey)
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: "session not found"})
 		return
 	}
 
 	lastChange, err := h.service.GetUserLastNicknameChange(session.UserID)
 	if err != nil {
 		h.logger.Errorw("GetCooldown: failed to get last nickname change", "user_id", session.UserID, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get last nickname change"})
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to get last nickname change"})
 		return
 	}
 
@@ -156,7 +182,7 @@ func (h *handler) GetCooldown(c *gin.Context) {
 		lastChangeUnix = &unixTime
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"lastNicknameChangeUnix": lastChangeUnix,
+	c.JSON(http.StatusOK, CooldownResponse{
+		LastNicknameChangeUnix: lastChangeUnix,
 	})
 }

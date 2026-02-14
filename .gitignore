@@ -78,3 +78,5 @@ minio/
 !Dockerfile
 !docker-compose.yml
 !air.toml
+
+docs/

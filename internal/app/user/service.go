@@ -15,13 +15,13 @@ import (
 const userCacheTTL = 5 * time.Minute
 
 type UserResponse struct {
-	ID               uint64    `json:"ID"`
-	Nickname         string    `json:"Nickname"`
-	CreatedAt        time.Time `json:"CreatedAt"`
-	SessionStartedAt time.Time `json:"SessionStartedAt"`
-	SessionKey       string    `json:"SessionKey"`
-	MessagesCount    int       `json:"MessagesCount"`
-	ThreadsCount     int       `json:"ThreadsCount"`
+	ID               uint64    `json:"id"`
+	Nickname         string    `json:"nickname"`
+	CreatedAt        time.Time `json:"created_at"`
+	SessionStartedAt time.Time `json:"session_started_at"`
+	SessionKey       string    `json:"session_key"`
+	MessagesCount    int       `json:"messages_count"`
+	ThreadsCount     int       `json:"threads_count"`
 }
 
 type Service interface {

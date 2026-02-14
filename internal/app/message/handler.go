@@ -27,25 +27,32 @@ func NewHandler(service Service, sessionSvc session.Service) Handler {
 	}
 }
 
+// @Summary Create a new message
+// @Description Create a new message in a thread
+// @Tags Message
+// @Accept json
+// @Produce json
+// @Param thread_id path int true "Thread ID"
+// @Param request body CreateMessageRequest true "Message creation request"
+// @Success 201 {object} MessageResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Router /api/messages/{thread_id} [post]
 func (h *handler) CreateMessage(c *gin.Context) {
 	threadIDStr := c.Param("thread_id")
 	threadID, err := strconv.ParseUint(threadIDStr, 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid thread ID"})
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid thread ID"})
 		return
 	}
-	var req struct {
-		Content      string  `json:"content" binding:"required"`
-		ParentID     *uint64 `json:"parent_id,omitempty"`
-		ShowAsAuthor bool    `json:"show_as_author"`
-	}
+	var req CreateMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid request body"})
 		return
 	}
 	sessionKey := c.Query("session_key")
 	if sessionKey == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "session_key is required"})
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "session_key is required"})
 		return
 	}
 	message, err := h.service.CreateMessage(
@@ -55,23 +62,34 @@ func (h *handler) CreateMessage(c *gin.Context) {
 		req.Content,
 		req.ParentID,
 		req.ShowAsAuthor,
+		req.AttachmentIDs,
 	)
 	if err != nil {
 		if err.Error() == "message creation cooldown: ..." {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
+			c.JSON(http.StatusTooManyRequests, ErrorResponse{Error: err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
 	c.JSON(http.StatusCreated, message)
 }
 
+// @Summary Get messages by thread ID
+// @Description Get paginated list of messages for a thread
+// @Tags Message
+// @Accept json
+// @Produce json
+// @Param thread_id path int true "Thread ID"
+// @Param page query int false "Page number" default(1)
+// @Param limit query int false "Items per page" default(10)
+// @Success 200 {object} MessageListResponse
+// @Router /api/messages/{thread_id} [get]
 func (h *handler) GetMessagesByThreadID(c *gin.Context) {
 	threadIDStr := c.Param("thread_id")
 	threadID, err := strconv.ParseUint(threadIDStr, 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid thread ID"})
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid thread ID"})
 		return
 	}
 	pageStr := c.DefaultQuery("page", "1")
@@ -86,35 +104,44 @@ func (h *handler) GetMessagesByThreadID(c *gin.Context) {
 	}
 	messages, total, err := h.service.GetMessagesByThreadID(c.Request.Context(), threadID, page, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get messages"})
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to get messages"})
 		return
 	}
 	totalPages := (total + int64(limit) - 1) / int64(limit)
-	c.JSON(http.StatusOK, gin.H{
-		"messages": messages,
-		"pagination": gin.H{
-			"page":       page,
-			"limit":      limit,
-			"total":      total,
-			"totalPages": totalPages,
+	c.JSON(http.StatusOK, MessageListResponse{
+		Messages: messages,
+		Pagination: Pagination{
+			Page:       page,
+			Limit:      limit,
+			Total:      total,
+			TotalPages: totalPages,
 		},
 	})
 }
 
+// @Summary Get message creation cooldown
+// @Description Get the timestamp of the last message creation
+// @Tags Message
+// @Accept json
+// @Produce json
+// @Param session_key query string true "Session key"
+// @Success 200 {object} MessageCooldownResponse
+// @Failure 401 {object} ErrorResponse
+// @Router /api/messages/cooldown [get]
 func (h *handler) GetMessageCooldown(c *gin.Context) {
 	sessionKey := c.Query("session_key")
 	if sessionKey == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "session_key is required"})
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "session_key is required"})
 		return
 	}
 	user, err := h.sessionSvc.GetUserBySessionKey(sessionKey)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: "user not found"})
 		return
 	}
 	lastMessageTime, err := h.service.GetMessageCooldown(user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get last message time"})
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to get last message time"})
 		return
 	}
 	var lastMessageUnix *int64
@@ -122,22 +149,32 @@ func (h *handler) GetMessageCooldown(c *gin.Context) {
 		unixTime := lastMessageTime.Unix()
 		lastMessageUnix = &unixTime
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"lastMessageCreationUnix": lastMessageUnix,
+	c.JSON(http.StatusOK, MessageCooldownResponse{
+		LastMessageCreationUnix: lastMessageUnix,
 	})
 }
 
+// @Summary Get message by ID
+// @Description Get a specific message by its ID
+// @Tags Message
+// @Accept json
+// @Produce json
+// @Param id path int true "Message ID"
+// @Success 200 {object} MessageResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/messages/message/{id} [get]
 func (h *handler) GetMessageByID(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid message ID"})
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid message ID"})
 		return
 	}
 	message, err := h.service.GetMessageByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: "message not found"})
 		return
 	}
-	c.JSON(http.StatusOK, message)
+	c.JSON(http.StatusOK, MessageResponse{Message: message})
 }

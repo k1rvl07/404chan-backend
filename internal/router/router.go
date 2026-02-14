@@ -1,16 +1,20 @@
 package router
 
 import (
+	"backend/internal/app/attachment"
 	"backend/internal/app/board"
 	"backend/internal/app/health"
 	"backend/internal/app/message"
 	"backend/internal/app/session"
 	"backend/internal/app/thread"
+	"backend/internal/app/upload"
 	"backend/internal/app/user"
 	"backend/internal/gateways/websocket"
 	"backend/internal/middleware"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	"github.com/swaggo/gin-swagger"
 	"go.uber.org/zap"
 )
 
@@ -52,6 +56,18 @@ func (r *Router) RegisterThreadRoutes(handler thread.Handler) {
 
 func (r *Router) RegisterMessageRoutes(handler message.Handler) {
 	message.RegisterRoutes(r.Engine.Group("/api"), handler)
+}
+
+func (r *Router) RegisterAttachmentRoutes(handler attachment.Handler) {
+	attachment.RegisterRoutes(r.Engine.Group("/api"), handler)
+}
+
+func (r *Router) RegisterUploadRoutes(handler *upload.Handler) {
+	upload.RegisterRoutes(r.Engine.Group("/api"), handler)
+}
+
+func (r *Router) RegisterSwaggerRoutes() {
+	r.Engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 }
 
 func (r *Router) Serve(addr string) error {

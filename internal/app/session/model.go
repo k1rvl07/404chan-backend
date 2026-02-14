@@ -20,3 +20,14 @@ type User struct {
 	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
 	UpdatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
+
+type SessionResponse struct {
+	ID         uint64    `json:"id"`
+	Nickname   string    `json:"nickname"`
+	CreatedAt  time.Time `json:"created_at"`
+	SessionKey string    `json:"session_key"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
+}

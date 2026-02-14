@@ -10,3 +10,11 @@ type Board struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+type BoardListResponse struct {
+	Boards []*Board `json:"boards"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
+}

@@ -20,21 +20,29 @@ func NewHandler(service Service) Handler {
 	return &handler{service: service}
 }
 
+// @Summary Create a new session
+// @Description Creates a new anonymous session and user for posting
+// @Tags Session
+// @Accept json
+// @Produce json
+// @Success 201 {object} SessionResponse
+// @Failure 400 {object} ErrorResponse
+// @Router /api/session [post]
 func (h *handler) CreateSession(c *gin.Context) {
 	userAgent := c.GetHeader("User-Agent")
 	ip := extractIP(c)
 
 	session, user, err := h.service.CreateSessionAndUser(userAgent, ip)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"ID":         user.ID,
-		"Nickname":   user.Nickname,
-		"CreatedAt":  session.CreatedAt,
-		"SessionKey": session.SessionKey,
+	c.JSON(http.StatusCreated, SessionResponse{
+		ID:         user.ID,
+		Nickname:   user.Nickname,
+		CreatedAt:  session.CreatedAt,
+		SessionKey: session.SessionKey,
 	})
 }
 

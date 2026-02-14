@@ -7,8 +7,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"backend/internal/app/attachment"
 	"backend/internal/app/session"
 	"backend/internal/app/user"
+	"backend/internal/providers/minio"
 	"backend/internal/providers/redis"
 	"backend/internal/utils"
 
@@ -17,7 +19,7 @@ import (
 )
 
 type Service interface {
-	CreateThread(ctx context.Context, boardID uint64, sessionKey, title, content string) (*Thread, error)
+	CreateThread(ctx context.Context, boardID uint64, sessionKey, title, content string, attachmentIDs []string) (*Thread, error)
 	GetThreadsByBoardID(ctx context.Context, boardID uint64, sort string, page, limit int) ([]*Thread, int64, error)
 	GetThreadByID(ctx context.Context, threadID uint64) (*Thread, error)
 	GetUserLastThreadTime(userID uint64) (*time.Time, error)
@@ -28,14 +30,16 @@ type Service interface {
 }
 
 type service struct {
-	repo        Repository
-	sessionSvc  session.Service
-	userSvc     user.Service
-	dbConn      *gorm.DB
-	redisP      *redis.RedisProvider
-	eventBus    *utils.EventBus
-	logger      *zap.SugaredLogger
-	cachePrefix string
+	repo          Repository
+	sessionSvc    session.Service
+	userSvc       user.Service
+	dbConn        *gorm.DB
+	redisP        *redis.RedisProvider
+	minioP        *minio.MinioProvider
+	eventBus      *utils.EventBus
+	logger        *zap.SugaredLogger
+	cachePrefix   string
+	attachmentSvc attachment.Service
 }
 
 func NewService(
@@ -46,16 +50,20 @@ func NewService(
 	redisP *redis.RedisProvider,
 	eventBus *utils.EventBus,
 	logger *zap.Logger,
+	minioP *minio.MinioProvider,
+	attachmentSvc attachment.Service,
 ) Service {
 	return &service{
-		repo:        repo,
-		sessionSvc:  sessionSvc,
-		userSvc:     userSvc,
-		dbConn:      dbConn,
-		redisP:      redisP,
-		eventBus:    eventBus,
-		logger:      logger.Sugar(),
-		cachePrefix: "threads:board",
+		repo:          repo,
+		sessionSvc:    sessionSvc,
+		userSvc:       userSvc,
+		dbConn:        dbConn,
+		redisP:        redisP,
+		minioP:        minioP,
+		eventBus:      eventBus,
+		logger:        logger.Sugar(),
+		cachePrefix:   "threads:board",
+		attachmentSvc: attachmentSvc,
 	}
 }
 
@@ -67,6 +75,7 @@ func (s *service) CreateThread(
 	ctx context.Context,
 	boardID uint64,
 	sessionKey, title, content string,
+	attachmentIDs []string,
 ) (*Thread, error) {
 	titleLength := utf8.RuneCountInString(title)
 	if titleLength < 3 || titleLength > 99 {
@@ -120,10 +129,10 @@ func (s *service) CreateThread(
 		}
 
 		if err := tx.Exec(`
-            INSERT INTO user_activities (user_id, thread_count, last_thread_at)
+            INSERT INTO user_activity (user_id, thread_count, last_thread_at)
             VALUES (?, 1, ?)
             ON CONFLICT (user_id) DO UPDATE SET
-                thread_count = user_activities.thread_count + 1,
+                thread_count = user_activity.thread_count + 1,
                 last_thread_at = EXCLUDED.last_thread_at,
                 updated_at = NOW()
         `, user.ID, now).Error; err != nil {
@@ -143,6 +152,12 @@ func (s *service) CreateThread(
 		return nil, fmt.Errorf("failed to create thread: %w", err)
 	}
 
+	if len(attachmentIDs) > 0 && s.attachmentSvc != nil {
+		if err := s.attachmentSvc.LinkToThreadByFileID(ctx, attachmentIDs, threadID); err != nil {
+			s.logger.Warn("Failed to link attachments to thread", zap.Uint64("thread_id", threadID), zap.Error(err))
+		}
+	}
+
 	threadData, err := s.repo.GetThreadByID(threadID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get created thread: %w", err)
@@ -150,6 +165,9 @@ func (s *service) CreateThread(
 
 	s.invalidateCache(boardID)
 	s.InvalidateTopThreadsCache()
+
+	userCacheKey := fmt.Sprintf("user:session:%s", sessionKey)
+	s.redisP.Del(context.Background(), userCacheKey)
 
 	eventData := map[string]interface{}{
 		"thread_id":       threadData.ID,
@@ -204,6 +222,34 @@ func (s *service) GetThreadsByBoardID(
 		return nil, 0, fmt.Errorf("failed to get threads: %w", err)
 	}
 
+	if len(threads) > 0 && s.attachmentSvc != nil {
+		for _, thread := range threads {
+			attachments, err := s.attachmentSvc.GetByThreadID(ctx, thread.ID)
+			if err != nil {
+				s.logger.Warn("Failed to get attachments for thread",
+					zap.Uint64("thread_id", thread.ID),
+					zap.Error(err),
+				)
+				continue
+			}
+			if len(attachments) > 0 {
+				thread.Attachments = make([]*ThreadAttachment, 0, len(attachments))
+				for _, att := range attachments {
+					thread.Attachments = append(thread.Attachments, &ThreadAttachment{
+						ID:          fmt.Sprintf("%d", att.ID),
+						FileID:      att.FileID,
+						FileName:    att.FileName,
+						FileURL:     att.FileURL,
+						FileSize:    att.FileSize,
+						ContentType: att.ContentType,
+						ObjectName:  att.ObjectName,
+						CreatedAt:   att.CreatedAt.Format(time.RFC3339),
+					})
+				}
+			}
+		}
+	}
+
 	if len(threads) > 0 {
 		result.Threads = threads
 		result.Total = total
@@ -232,6 +278,29 @@ func (s *service) GetThreadByID(ctx context.Context, threadID uint64) (*Thread, 
 	}
 
 	if threadData != nil {
+		if s.attachmentSvc != nil {
+			attachments, err := s.attachmentSvc.GetByThreadID(ctx, threadID)
+			if err != nil {
+				s.logger.Warn("Failed to get attachments for thread",
+					zap.Uint64("thread_id", threadID),
+					zap.Error(err),
+				)
+			} else if len(attachments) > 0 {
+				threadData.Attachments = make([]*ThreadAttachment, 0, len(attachments))
+				for _, att := range attachments {
+					threadData.Attachments = append(threadData.Attachments, &ThreadAttachment{
+						ID:          att.FileID,
+						FileID:      att.FileID,
+						FileName:    att.FileName,
+						FileURL:     att.FileURL,
+						FileSize:    att.FileSize,
+						ContentType: att.ContentType,
+						ObjectName:  att.ObjectName,
+						CreatedAt:   att.CreatedAt.Format("2006-01-02T15:04:05Z"),
+					})
+				}
+			}
+		}
 		data, err := json.Marshal(threadData)
 		if err == nil {
 			s.redisP.SetEX(ctx, cacheKey, data, 5*time.Minute)
@@ -286,7 +355,7 @@ func (s *service) GetTopThreads(ctx context.Context, sort string, page, limit in
 		limit = 50
 	}
 
-	cacheKey := fmt.Sprintf("threads:top:sort:%s:page:%d:limit:%d:24h", sort, page, limit)
+	cacheKey := fmt.Sprintf("threads:top:sort:%s:page:%d:limit:%d", sort, page, limit)
 	cmd := s.redisP.Get(ctx, cacheKey)
 	cachedData, err := cmd.Result()
 	var result struct {
@@ -299,9 +368,30 @@ func (s *service) GetTopThreads(ctx context.Context, sort string, page, limit in
 		}
 	}
 
-	threads, total, err := s.repo.GetTopThreadsFiltered(sort, page, limit)
+	threads, total, err := s.repo.GetTopThreads(sort, page, limit)
 	if err != nil {
 		return nil, 0, err
+	}
+
+	for _, t := range threads {
+		attachments, err := s.attachmentSvc.GetByThreadID(ctx, t.ID)
+		if err != nil {
+			s.logger.Warnw("Failed to load attachments for thread", "thread_id", t.ID, "error", err)
+			continue
+		}
+		t.Attachments = make([]*ThreadAttachment, len(attachments))
+		for i, att := range attachments {
+			t.Attachments[i] = &ThreadAttachment{
+				ID:          fmt.Sprintf("%d", att.ID),
+				FileID:      att.FileID,
+				FileName:    att.FileName,
+				FileURL:     att.FileURL,
+				FileSize:    att.FileSize,
+				ContentType: att.ContentType,
+				ObjectName:  att.ObjectName,
+				CreatedAt:   att.CreatedAt.Format(time.RFC3339),
+			}
+		}
 	}
 
 	if len(threads) > 0 {
@@ -316,7 +406,7 @@ func (s *service) GetTopThreads(ctx context.Context, sort string, page, limit in
 
 func (s *service) InvalidateTopThreadsCache() {
 	ctx := context.Background()
-	pattern := "threads:top:sort:*:page:*:limit:*:24h"
+	pattern := "threads:top:sort:*:page:*:limit:*"
 	var cursor uint64
 	deletedCount := 0
 	for {
