@@ -1,0 +1,8 @@
+.git
+.env
+README.md
+Makefile
+*.log
+.DS_Store
+.vscode
+.idea
