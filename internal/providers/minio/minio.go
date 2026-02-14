@@ -29,21 +29,25 @@ type MinioProvider struct {
 }
 
 func NewMinioProvider(cfg *config.Config, logger *zap.Logger) (*MinioProvider, error) {
-	u, err := url.Parse(cfg.MinioURL)
+	minioURL := cfg.MinioURL
+	if !strings.HasPrefix(minioURL, "http://") && !strings.HasPrefix(minioURL, "https://") {
+		minioURL = "https://" + minioURL
+	}
+
+	u, err := url.Parse(minioURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse minio URL: %w", err)
 	}
 	secure := u.Scheme == "https"
 
-	logger.Info("Initializing MinIO", zap.String("url", cfg.MinioURL), zap.Bool("secure", secure))
+	logger.Info("Initializing MinIO", zap.String("url", minioURL), zap.Bool("secure", secure))
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
 	}
-	// Follow redirects up to 10 times
 	tr.MaxIdleConnsPerHost = 256
 
-	client, err := minio.New(cfg.MinioURL, &minio.Options{
+	client, err := minio.New(minioURL, &minio.Options{
 		Creds:     credentials.NewStaticV4(cfg.MinioUser, cfg.MinioPassword, ""),
 		Secure:    secure,
 		Transport: tr,
