@@ -3,9 +3,11 @@ package minio
 import (
 	"backend/internal/config"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -33,9 +35,18 @@ func NewMinioProvider(cfg *config.Config, logger *zap.Logger) (*MinioProvider, e
 	}
 	secure := u.Scheme == "https"
 
+	logger.Info("Initializing MinIO", zap.String("url", cfg.MinioURL), zap.Bool("secure", secure))
+
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
+	}
+	// Follow redirects up to 10 times
+	tr.MaxIdleConnsPerHost = 256
+
 	client, err := minio.New(cfg.MinioURL, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.MinioUser, cfg.MinioPassword, ""),
-		Secure: secure,
+		Creds:     credentials.NewStaticV4(cfg.MinioUser, cfg.MinioPassword, ""),
+		Secure:    secure,
+		Transport: tr,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create minio client: %w", err)
@@ -65,10 +76,14 @@ func NewMinioProvider(cfg *config.Config, logger *zap.Logger) (*MinioProvider, e
 func (m *MinioProvider) ensureBucket() error {
 	ctx := context.Background()
 
+	m.logger.Info("Checking if bucket exists", zap.String("bucket", m.bucket))
 	exists, err := m.client.BucketExists(ctx, m.bucket)
 	if err != nil {
+		m.logger.Error("BucketExists error", zap.Error(err), zap.String("bucket", m.bucket))
 		return fmt.Errorf("failed to check bucket: %w", err)
 	}
+
+	m.logger.Info("Bucket exists check result", zap.Bool("exists", exists), zap.String("bucket", m.bucket))
 
 	if !exists {
 		err := m.client.MakeBucket(ctx, m.bucket, minio.MakeBucketOptions{})
