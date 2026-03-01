@@ -24,6 +24,7 @@ type Config struct {
 	MinioBucket     string
 	MaxFileSize     int64
 	MaxFilesPerPost int
+	AdminAPIKey     string
 }
 
 func LoadConfig() Config {
@@ -33,7 +34,7 @@ func LoadConfig() Config {
 		ttl = 5 * time.Minute
 	}
 
-	maxFileSize := getEnvAsInt64("MAX_FILE_SIZE", 10*1024*1024) // 10MB default
+	maxFileSize := getEnvAsInt64("MAX_FILE_SIZE", 10*1024*1024)
 	maxFilesPerPost := getEnvAsInt("MAX_FILES_PER_POST", 5)
 
 	return Config{
@@ -53,6 +54,7 @@ func LoadConfig() Config {
 		MinioBucket:     getEnv("MINIO_BUCKET", "404chan-files"),
 		MaxFileSize:     maxFileSize,
 		MaxFilesPerPost: maxFilesPerPost,
+		AdminAPIKey:     getEnv("ADMIN_API_KEY", ""),
 	}
 }
 

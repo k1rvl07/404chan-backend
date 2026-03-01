@@ -3,6 +3,7 @@ package router
 import (
 	"backend/internal/app/attachment"
 	"backend/internal/app/board"
+	"backend/internal/app/cleanup"
 	"backend/internal/app/health"
 	"backend/internal/app/message"
 	"backend/internal/app/session"
@@ -64,6 +65,12 @@ func (r *Router) RegisterAttachmentRoutes(handler attachment.Handler) {
 
 func (r *Router) RegisterUploadRoutes(handler *upload.Handler) {
 	upload.RegisterRoutes(r.Engine.Group("/api"), handler)
+}
+
+func (r *Router) RegisterCleanupRoutes(handler cleanup.Handler, adminAPIKey string) {
+	cleanup := r.Engine.Group("/api/cleanup")
+	cleanup.Use(middleware.AdminAPIKeyMiddleware(adminAPIKey))
+	cleanup.POST("", handler.Cleanup)
 }
 
 func (r *Router) RegisterSwaggerRoutes() {

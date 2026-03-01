@@ -3,6 +3,7 @@ package app
 import (
 	"backend/internal/app/attachment"
 	"backend/internal/app/board"
+	"backend/internal/app/cleanup"
 	"backend/internal/app/health"
 	"backend/internal/app/message"
 	"backend/internal/app/session"
@@ -92,6 +93,8 @@ func Bootstrap(cfg *config.Config, logger *zap.Logger) (*Application, error) {
 	threadHandler := thread.NewHandler(threadService, sessionService, userService)
 	messageHandler := message.NewHandler(messageService, sessionService)
 	attachmentHandler := attachment.NewHandler(attachmentService)
+	cleanupService := cleanup.NewService(dbConn, redisProvider, minioProvider, logger)
+	cleanupHandler := cleanup.NewHandler(cleanupService)
 
 	r := router.NewRouter(logger)
 
@@ -104,6 +107,7 @@ func Bootstrap(cfg *config.Config, logger *zap.Logger) (*Application, error) {
 	r.RegisterMessageRoutes(messageHandler)
 	r.RegisterAttachmentRoutes(attachmentHandler)
 	r.RegisterUploadRoutes(uploadHandler)
+	r.RegisterCleanupRoutes(cleanupHandler, cfg.AdminAPIKey)
 	r.RegisterSwaggerRoutes()
 
 	return &Application{

@@ -27,6 +27,10 @@ import (
 // @in header
 // @name Authorization
 // @description Type "Bearer" followed by a space and JWT token.
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name X-Admin-API-Key
+// @description Admin API key for cleanup operations
 
 func main() {
 	logger, err := utils.NewLogger()

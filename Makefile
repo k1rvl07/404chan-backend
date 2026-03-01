@@ -5,4 +5,3 @@ build:
 
 run: build
 	./tmp/main
-	

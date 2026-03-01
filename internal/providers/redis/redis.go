@@ -88,6 +88,10 @@ func (r *RedisProvider) Scan(ctx context.Context, cursor uint64, pattern string,
 	return r.Client.Scan(ctx, cursor, pattern, count)
 }
 
+func (r *RedisProvider) FlushDB(ctx context.Context) error {
+	return r.Client.FlushDB(ctx).Err()
+}
+
 func (r *RedisProvider) startConnectionMonitor(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
