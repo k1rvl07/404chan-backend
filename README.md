@@ -4,43 +4,70 @@
 
 ## Технологии
 
-- **Go 1.24.1** — язык программирования
+- **Go 1.24+** — язык программирования
 - **Gin** — HTTP-фреймворк
 - **GORM** — ORM для PostgreSQL (с AutoMigrate)
 - **Redis** — кэширование и PubSub
 - **Gorilla WebSocket** — WebSocket
 - **Uber Zap** — структурированное логирование
+- **MinIO** — хранение файлов
 
-## Быстрый старт
+## Запуск
 
-### Требования
-
-- Go 1.24+
-- PostgreSQL 14+
-- Redis 7+
-
-### Установка
+Основной способ запуска — общий dev-стек из родительского репозитория `404chan`:
 
 ```bash
-# Копируем переменные окружения
+git clone --recurse-submodules git@github.com:k1rvl07/404chan.git
+cd 404chan
+make init
+make dev
+```
+
+Dev-стек поднимает PostgreSQL, Redis, MinIO, backend и frontend в Docker, а Zellij показывает логи и shell-панели.
+
+### Автономный запуск backend
+
+Требования: Go 1.24+, PostgreSQL 14+, Redis 7+, MinIO.
+
+```bash
 cp .env.example .env
+# В .env укажите локальные адреса сервисов:
+# DB_HOST=localhost
+# REDIS_URL=redis://default:redis_password@localhost:6379/0
+# MINIO_URL=localhost:9000
 
-# Устанавливаем зависимости
-go mod tidy
+go mod download
+swag init
+make dev      # swag init + air
+```
 
-# Запуск (миграции и сиды выполняются автоматически)
-air
+Или сборка и запуск:
 
-# Или сборка и запуск
+```bash
 make build
 make run
 ```
 
-### Отдельные команды
+`docs/` генерируется командой `swag init` и не хранится в git. Без этого шага сборка невозможна, так как `main.go` импортирует `backend/docs`.
+
+### Prod
 
 ```bash
-make migrate   # Только миграции
-make seed      # Только сиды
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Prod-стек backend включает PostgreSQL, Redis, MinIO и сам backend. Для общего prod-стека с frontend используйте `docker-compose.prod.yml` в корне репозитория.
+
+## Команды
+
+```bash
+make swag     # генерация Swagger-документации
+make build    # сборка бинарника
+make run      # сборка и запуск
+make dev      # swag init + air
+make lint     # go vet
+make test     # go test
+make clean    # удалить tmp
 ```
 
 ## Структура проекта
@@ -48,18 +75,21 @@ make seed      # Только сиды
 ```
 internal/
 ├── app/              # Бизнес-логика (по фичам)
+│   ├── attachment/   # Вложения
 │   ├── board/        # Доски
-│   ├── thread/       # Треды
+│   ├── cleanup/      # Очистка
+│   ├── health/       # Health check
 │   ├── message/      # Сообщения
-│   ├── user/         # Пользователи
 │   ├── session/      # Сессии
-│   └── health/       # Health check
+│   ├── thread/       # Треды
+│   ├── upload/       # Загрузка файлов
+│   └── user/         # Пользователи
 ├── config/           # Конфигурация
 ├── db/               # Подключение PostgreSQL
-│   └── seeder/      # Сиды базы данных
-├── gateways/        # Внешние сервисы (WebSocket)
+│   └── seeder/       # Сиды базы данных
+├── gateways/         # WebSocket
 ├── middleware/       # HTTP middleware (CORS, логирование)
-├── providers/        # Redis provider
+├── providers/        # Redis и MinIO
 ├── router/           # Маршрутизация
 └── utils/            # Утилиты
 ```
@@ -77,25 +107,16 @@ app/feature/
 └── route.go      # Маршруты
 ```
 
-## Миграции
+## Миграции и сиды
 
-Используется **GORM AutoMigrate** — миграции выполняются автоматически при запуске приложения.
+Используется **GORM AutoMigrate** — миграции выполняются автоматически при запуске приложения. Сиды также создаются при старте (доски `a`, `b`, `c`, `mu`, `prog`, `sci`).
 
-При изменении моделей просто обновите структуры в `model.go`, GORM автоматически применит изменения.
-
-## Сиды
-
-Сиды (начальные данные) создаются автоматически при запуске:
-
-- Доски по умолчанию: `a` (Anime), `b` (Random), `c` (Cute), `mu` (Music), `prog` (Programming), `sci` (Science)
-- Примерные треды в доске `b`
-
-## API эндпоинты
+## API
 
 ### Health Check
 
 ```http
-GET /health
+GET /api/health
 ```
 
 ### Boards
@@ -111,13 +132,19 @@ GET    /api/boards/:slug   # Доска по slug
 ```http
 GET    /api/boards/:slug/threads       # Список тредов в доске
 POST   /api/boards/:slug/threads       # Создать тред
-GET    /api/threads/:id                 # Тред с сообщениями
+GET    /api/threads/:id                # Тред с сообщениями
 ```
 
 ### Messages
 
 ```http
-POST   /api/threads/:id/messages        # Ответ в тред
+POST   /api/threads/:id/messages       # Ответ в тред
+```
+
+## Swagger
+
+```http
+http://localhost:8080/swagger/index.html
 ```
 
 ## WebSocket

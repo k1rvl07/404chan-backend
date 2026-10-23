@@ -62,7 +62,7 @@ $RECYCLE.BIN/
 .env.production
 .env.test
 
-docker-compose.override.ymlma
+docker-compose.override.yml
 
 *.log
 logs/
